@@ -71,6 +71,15 @@ export default function Dashboard() {
     fetchProducts();
   }
 
+  async function handleSetPrice(id: number, price: number) {
+    await fetch(`/api/products/${id}/check-price`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ price }),
+    });
+    fetchProducts();
+  }
+
   async function handleDelete(id: number) {
     await fetch(`/api/products/${id}`, { method: "DELETE" });
     fetchProducts();
@@ -99,6 +108,7 @@ export default function Dashboard() {
               key={product.id}
               product={product}
               onCheckPrice={handleCheckPrice}
+              onSetPrice={handleSetPrice}
               onDelete={handleDelete}
             />
           ))}

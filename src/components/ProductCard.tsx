@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Sparkline from "./Sparkline";
 
 export interface ProductCardData {
@@ -37,10 +38,13 @@ const trendColors = {
 interface ProductCardProps {
   product: ProductCardData;
   onCheckPrice: (id: number) => void;
+  onSetPrice: (id: number, price: number) => void;
   onDelete: (id: number) => void;
 }
 
-export default function ProductCard({ product, onCheckPrice, onDelete }: ProductCardProps) {
+export default function ProductCard({ product, onCheckPrice, onSetPrice, onDelete }: ProductCardProps) {
+  const [manualPrice, setManualPrice] = useState("");
+  const [showManual, setShowManual] = useState(false);
   const isAlert =
     product.current_price != null && product.current_price <= product.desired_price;
   const trend = getTrend(product.priceHistory);
@@ -108,12 +112,50 @@ export default function ProductCard({ product, onCheckPrice, onDelete }: Product
           Check Price
         </button>
         <button
+          onClick={() => setShowManual(!showManual)}
+          className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded font-medium transition"
+        >
+          Set Price
+        </button>
+        <button
           onClick={() => onDelete(product.id)}
           className="text-xs px-3 py-1.5 text-red-500 hover:bg-red-50 rounded font-medium transition"
         >
           Remove
         </button>
       </div>
+
+      {showManual && (
+        <form
+          className="mt-2 flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const val = parseFloat(manualPrice);
+            if (!isNaN(val) && val > 0) {
+              onSetPrice(product.id, val);
+              setManualPrice("");
+              setShowManual(false);
+            }
+          }}
+        >
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={manualPrice}
+            onChange={(e) => setManualPrice(e.target.value)}
+            placeholder="Enter price"
+            className="flex-1 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            autoFocus
+          />
+          <button
+            type="submit"
+            className="text-xs px-3 py-1 bg-emerald-600 text-white rounded font-medium hover:bg-emerald-700 transition"
+          >
+            Save
+          </button>
+        </form>
+      )}
     </div>
   );
 }
