@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRegion } from "./RegionContext";
 import FrequencySelector from "./FrequencySelector";
 import type { CheckFrequency } from "@/lib/db";
@@ -20,6 +20,11 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
   const [minTrust, setMinTrust] = useState(globalMinTrust.toString());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Sync min trust with global default when modal opens
+  useEffect(() => {
+    if (open) setMinTrust(globalMinTrust.toString());
+  }, [open, globalMinTrust]);
 
   if (!open) return null;
 
