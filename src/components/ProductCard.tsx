@@ -28,6 +28,7 @@ interface ProductCardProps {
   onDelete: (id: number) => void;
   onRemoveSource: (productId: number, sourceId: number) => void;
   onFindMore: (productId: number) => void;
+  onRefresh: (productId: number) => void;
 }
 
 function getTrend(history: number[]): "up" | "down" | "stable" {
@@ -42,7 +43,7 @@ function getTrend(history: number[]): "up" | "down" | "stable" {
 const trendIcons = { up: "\u2191", down: "\u2193", stable: "\u2192" };
 const trendColors = { up: "text-red-500", down: "text-emerald-500", stable: "text-gray-400" };
 
-export default function ProductCard({ product, onDelete, onRemoveSource, onFindMore }: ProductCardProps) {
+export default function ProductCard({ product, onDelete, onRemoveSource, onFindMore, onRefresh }: ProductCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isSearching = product.search_status === "searching" || product.search_status === "pending";
   const isAlert = product.best_price != null && product.desired_price != null && product.best_price <= product.desired_price;
@@ -186,7 +187,15 @@ export default function ProductCard({ product, onDelete, onRemoveSource, onFindM
 
       {/* Actions */}
       {!isSearching && (
-        <div className="px-4 py-2 border-t border-gray-100">
+        <div className="px-4 py-2 border-t border-gray-100 space-y-1.5">
+          {product.sources.length > 0 && (
+            <button
+              onClick={() => onRefresh(product.id)}
+              className="w-full text-xs py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded font-medium transition"
+            >
+              Refresh Prices
+            </button>
+          )}
           {product.sources.length < 10 && (
             <button
               onClick={() => onFindMore(product.id)}

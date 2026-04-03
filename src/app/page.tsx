@@ -96,6 +96,34 @@ export default function Dashboard() {
     await fetchProducts();
   }
 
+  async function handleRefresh(productId: number) {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, search_status: "searching" } : p
+      )
+    );
+    setFiltered((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, search_status: "searching" } : p
+      )
+    );
+
+    try {
+      await fetch(`/api/products/${productId}/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          country: region.name,
+          currency: region.currency,
+        }),
+      });
+    } catch (err) {
+      console.error("Refresh failed:", err);
+    }
+
+    await fetchProducts();
+  }
+
   async function handleRemoveSource(productId: number, sourceId: number) {
     await fetch(`/api/products/${productId}/sources/${sourceId}`, {
       method: "DELETE",
@@ -137,6 +165,7 @@ export default function Dashboard() {
               onDelete={handleDelete}
               onRemoveSource={handleRemoveSource}
               onFindMore={handleFindMore}
+              onRefresh={handleRefresh}
             />
           ))}
         </div>
