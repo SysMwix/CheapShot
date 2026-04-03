@@ -40,12 +40,7 @@ search:
     - clickmechanic.com
     - parkers.co.uk
     - carwow.co.uk
-    # Price comparison (we are the price comparison)
-    - idealo.co.uk
-    - pricerunner.com
-    - kelkoo.co.uk
-    - pricespy.co.uk
-    - pricehunter.co.uk
+    # Google Shopping (too noisy)
     - google.com/shopping
 
 engines:

@@ -78,6 +78,17 @@ export default function ProductGrid({ categoryFilter, defaultAddCategory }: Prod
     return () => window.removeEventListener("cheapshot-product-added", handleChatAdd);
   }, [fetchProducts]);
 
+  // Poll for updates while any product is still searching
+  useEffect(() => {
+    const hasSearching = products.some((p) => p.search_status === "searching" || p.search_status === "pending");
+    if (!hasSearching) return;
+
+    const interval = setInterval(() => {
+      fetchProducts();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [products, fetchProducts]);
+
   // Re-apply search + trust filters
   useEffect(() => {
     let result = products;
