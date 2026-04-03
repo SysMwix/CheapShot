@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, Product, ProductSource } from "@/lib/db";
 import { searchProducts } from "@/services/ai-search";
-import { extractPriceFromUrl } from "@/services/price-extractor";
 import { getTrustScore } from "@/services/trust-score";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -30,48 +29,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
   db.prepare("UPDATE products SET search_status = 'searching', updated_at = datetime('now') WHERE id = ?").run(id);
 
   try {
+    // Combine: existing sources + blacklisted retailers + request exclusions
     const existingSources = db
       .prepare("SELECT retailer FROM product_sources WHERE product_id = ?")
       .all(id) as { retailer: string }[];
+    const blacklisted: string[] = JSON.parse(product.excluded_retailers || "[]");
     const allExcluded = [
       ...existingSources.map((s) => s.retailer),
+      ...blacklisted,
       ...(excludeRetailers || []),
     ];
 
     const slotsLeft = 10 - existingCount.count;
 
-    // Step 1: AI finds retailer URLs
+    // AI finds retailers + Cheerio verifies live prices
     console.log(`[Search] Finding retailers for "${product.name}"...`);
-    const offers = await searchProducts(
+    const verifiedOffers = await searchProducts(
       product.name,
       country,
       currency || product.currency,
       allExcluded.length > 0 ? allExcluded : undefined
     );
 
-    const toProcess = offers.slice(0, slotsLeft);
-
-    // Step 2: Fetch each URL and extract live prices in parallel
-    console.log(`[Search] Verifying ${toProcess.length} prices from live pages...`);
-    const verifiedOffers = await Promise.all(
-      toProcess.map(async (offer) => {
-        const extracted = await extractPriceFromUrl(
-          offer.url,
-          product.name,
-          currency || product.currency
-        );
-        return {
-          ...offer,
-          // Use live price if we got one, fall back to AI hint
-          price: extracted.price ?? offer.price ?? 0,
-          currency: extracted.currency || offer.currency || product.currency,
-          name: extracted.name || offer.name,
-          image_url: extracted.image_url || offer.image_url || null,
-        };
-      })
-    );
-
-    // Step 3: Insert sources with verified prices
+    // Insert sources with verified prices
     const insertStmt = db.prepare(
       `INSERT INTO product_sources (product_id, retailer, url, image_url, current_price, currency, last_checked_at)
        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
@@ -80,9 +60,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       `INSERT INTO price_history (source_id, price) VALUES (?, ?)`
     );
 
+    const toInsert = verifiedOffers.slice(0, slotsLeft);
     const newSourceIds: number[] = [];
-    for (const offer of verifiedOffers) {
-      if (!offer.price || offer.price <= 0) continue; // skip if no price at all
+    for (const offer of toInsert) {
+      if (!offer.price || offer.price <= 0) continue;
 
       const result = insertStmt.run(
         id,

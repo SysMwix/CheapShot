@@ -36,7 +36,7 @@ export async function GET() {
 // POST /api/products — create a new product
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, desired_price, currency, check_frequency, check_day } = body;
+  const { name, desired_price, currency, check_frequency, check_day, min_trust_score } = body;
 
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -45,15 +45,16 @@ export async function POST(request: NextRequest) {
   const db = getDb();
   const result = db
     .prepare(
-      `INSERT INTO products (name, desired_price, currency, search_status, check_frequency, check_day)
-       VALUES (?, ?, ?, 'pending', ?, ?)`
+      `INSERT INTO products (name, desired_price, currency, search_status, check_frequency, check_day, min_trust_score)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?)`
     )
     .run(
       name,
       desired_price ?? null,
       currency || "GBP",
       check_frequency || "manual",
-      check_day ?? null
+      check_day ?? null,
+      min_trust_score ?? 0
     );
 
   const product = db.prepare("SELECT * FROM products WHERE id = ?").get(result.lastInsertRowid) as Product;

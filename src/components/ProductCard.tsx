@@ -38,6 +38,7 @@ interface ProductCardProps {
   onFindMore: (productId: number) => void;
   onRefresh: (productId: number) => void;
   onUpdateFrequency: (productId: number, frequency: CheckFrequency, checkDay: number | null) => void;
+  onUpdateTarget: (productId: number, desiredPrice: number | null) => void;
 }
 
 function getTrend(history: number[]): "up" | "down" | "stable" {
@@ -68,10 +69,12 @@ function ordinal(n: number): string {
 }
 
 export default function ProductCard({
-  product, onDelete, onRemoveSource, onFindMore, onRefresh, onUpdateFrequency,
+  product, onDelete, onRemoveSource, onFindMore, onRefresh, onUpdateFrequency, onUpdateTarget,
 }: ProductCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [editFreq, setEditFreq] = useState(false);
+  const [editTarget, setEditTarget] = useState(false);
+  const [targetInput, setTargetInput] = useState("");
   const isSearching = product.search_status === "searching" || product.search_status === "pending";
   const isAlert = product.best_price != null && product.desired_price != null && product.best_price <= product.desired_price;
   const trend = getTrend(product.priceHistory);
@@ -151,10 +154,42 @@ export default function ProductCard({
                 </span>
               )}
             </div>
-            {product.desired_price != null && (
-              <div className="text-xs text-gray-500">
-                Target: {product.currency} {product.desired_price.toFixed(2)}
-              </div>
+            {!editTarget ? (
+              <button
+                onClick={() => {
+                  setTargetInput(product.desired_price?.toString() || "");
+                  setEditTarget(true);
+                }}
+                className="text-xs text-gray-500 hover:text-emerald-600 transition"
+              >
+                {product.desired_price != null
+                  ? `Target: ${product.currency} ${product.desired_price.toFixed(2)}`
+                  : "Set target price"}
+              </button>
+            ) : (
+              <form
+                className="flex items-center gap-1 mt-0.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const val = targetInput.trim() ? parseFloat(targetInput) : null;
+                  onUpdateTarget(product.id, val && !isNaN(val) ? val : null);
+                  setEditTarget(false);
+                }}
+              >
+                <span className="text-xs text-gray-400">{product.currency}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={targetInput}
+                  onChange={(e) => setTargetInput(e.target.value)}
+                  className="w-20 border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  autoFocus
+                  placeholder="0.00"
+                />
+                <button type="submit" className="text-xs text-emerald-600 font-medium">Save</button>
+                <button type="button" onClick={() => setEditTarget(false)} className="text-xs text-gray-400">&times;</button>
+              </form>
             )}
           </div>
           <Sparkline

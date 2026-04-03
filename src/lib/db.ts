@@ -15,6 +15,13 @@ export function getDb(): Database.Database {
   return db;
 }
 
+function addColumnIfMissing(db: Database.Database, table: string, column: string, definition: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
 function migrate(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS products (
@@ -25,6 +32,8 @@ function migrate(db: Database.Database) {
       search_status TEXT NOT NULL DEFAULT 'pending',
       check_frequency TEXT NOT NULL DEFAULT 'manual',
       check_day INTEGER,
+      min_trust_score INTEGER NOT NULL DEFAULT 0,
+      excluded_retailers TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -73,7 +82,9 @@ export interface Product {
   currency: string;
   search_status: "pending" | "searching" | "done" | "error";
   check_frequency: CheckFrequency;
-  check_day: number | null; // 0-6 for weekly (0=Sun), 1-31 for monthly
+  check_day: number | null;
+  min_trust_score: number;
+  excluded_retailers: string; // JSON array string
   created_at: string;
   updated_at: string;
 }

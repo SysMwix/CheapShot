@@ -17,6 +17,7 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
   const [desiredPrice, setDesiredPrice] = useState("");
   const [checkFrequency, setCheckFrequency] = useState<CheckFrequency>("manual");
   const [checkDay, setCheckDay] = useState<number | null>(null);
+  const [minTrust, setMinTrust] = useState("0");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -39,6 +40,7 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
           currency: region.currency,
           check_frequency: checkFrequency,
           check_day: checkDay,
+          min_trust_score: parseInt(minTrust) || 0,
         }),
       });
 
@@ -52,6 +54,7 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
       setDesiredPrice("");
       setCheckFrequency("manual");
       setCheckDay(null);
+      setMinTrust("0");
       onAdded(product.id);
       onClose();
     } catch (err) {
@@ -112,6 +115,22 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
                 setCheckDay(day);
               }}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Min Trust Score <span className="text-gray-400 font-normal">— hide untrusted sites</span>
+            </label>
+            <select
+              value={minTrust}
+              onChange={(e) => setMinTrust(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="0">No minimum</option>
+              <option value="30">30+ (Avoid scams)</option>
+              <option value="50">50+ (Moderate trust)</option>
+              <option value="70">70+ (Well trusted only)</option>
+              <option value="90">90+ (Major retailers only)</option>
+            </select>
           </div>
           <button
             type="submit"

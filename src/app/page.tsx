@@ -138,29 +138,41 @@ export default function Dashboard() {
   }
 
   async function handleRefreshAll() {
-    const withSources = products.filter((p) => p.sources.length > 0 && p.search_status !== "searching");
-    if (withSources.length === 0) return;
+    const eligible = products.filter((p) => p.search_status !== "searching" && p.search_status !== "pending");
+    if (eligible.length === 0) return;
 
     setRefreshingAll(true);
 
-    // Mark all as searching for instant UI feedback
-    const ids = new Set(withSources.map((p) => p.id));
+    // Mark all as searching
+    const ids = new Set(eligible.map((p) => p.id));
     setProducts((prev) => prev.map((p) => ids.has(p.id) ? { ...p, search_status: "searching" } : p));
     setFiltered((prev) => prev.map((p) => ids.has(p.id) ? { ...p, search_status: "searching" } : p));
 
-    // Refresh all in parallel
+    // Products with sources get refreshed, those without get a new search
     await Promise.all(
-      withSources.map((p) =>
-        fetch(`/api/products/${p.id}/refresh`, {
+      eligible.map((p) => {
+        const endpoint = p.sources.length > 0
+          ? `/api/products/${p.id}/refresh`
+          : `/api/products/${p.id}/search`;
+        return fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ country: region.name, currency: region.currency }),
-        }).catch((err) => console.error(`Refresh failed for ${p.name}:`, err))
-      )
+        }).catch((err) => console.error(`Refresh failed for ${p.name}:`, err));
+      })
     );
 
     await fetchProducts();
     setRefreshingAll(false);
+  }
+
+  async function handleUpdateTarget(productId: number, desiredPrice: number | null) {
+    await fetch(`/api/products/${productId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ desired_price: desiredPrice }),
+    });
+    await fetchProducts();
   }
 
   async function handleUpdateFrequency(productId: number, frequency: CheckFrequency, checkDay: number | null) {
@@ -204,6 +216,7 @@ export default function Dashboard() {
               onFindMore={handleFindMore}
               onRefresh={handleRefresh}
               onUpdateFrequency={handleUpdateFrequency}
+              onUpdateTarget={handleUpdateTarget}
             />
           ))}
         </div>
