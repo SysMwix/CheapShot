@@ -196,22 +196,25 @@ export default function ProductGrid({ categoryFilter, defaultAddCategory }: Prod
   }
 
   async function handleClearAll() {
-    const eligible = products.filter((p) => p.sources.length > 0);
-    if (eligible.length === 0) return;
-
     setRefreshingAll(true);
+    const eligible = products;
 
-    // Delete all sources for each product
+    // Delete all sources and clear excluded retailers for each product
     for (const p of eligible) {
       for (const s of p.sources) {
         await fetch(`/api/products/${p.id}/sources/${s.id}`, { method: "DELETE" });
       }
+      // Reset excluded retailers
+      await fetch(`/api/products/${p.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ excluded_retailers: "[]" }),
+      });
     }
 
     // Mark all as searching
-    const ids = new Set(eligible.map((p) => p.id));
-    setProducts((prev) => prev.map((p) => ids.has(p.id) ? { ...p, sources: [], best_price: null, search_status: "searching" } : p));
-    setFiltered((prev) => prev.map((p) => ids.has(p.id) ? { ...p, sources: [], best_price: null, search_status: "searching" } : p));
+    setProducts((prev) => prev.map((p) => ({ ...p, sources: [], best_price: null, search_status: "searching" })));
+    setFiltered((prev) => prev.map((p) => ({ ...p, sources: [], best_price: null, search_status: "searching" })));
 
     // Kick off fresh searches for all
     await Promise.all(

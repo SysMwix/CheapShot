@@ -34,11 +34,12 @@ export async function searchProducts(
 ): Promise<ProductOffer[]> {
   const curr = currency || "GBP";
 
-  // Search the web
+  // Multiple search angles to find actual product pages
   const searchQueries = [
-    `${query} buy UK`,
-    `${query} price £`,
-    `${query} shop`,
+    `${query} buy`,
+    `${query} price`,
+    `${query} for sale`,
+    `${query} £`,
   ];
   if (searchHint) {
     searchQueries.push(`${query} ${searchHint}`);
@@ -48,7 +49,7 @@ export async function searchProducts(
   const allResults = new Map<string, { title: string; url: string; content: string }>();
 
   for (const sq of searchQueries) {
-    const results = await webSearch(sq, 15);
+    const results = await webSearch(sq, 30);
     for (const r of results) {
       if (!allResults.has(r.url)) {
         allResults.set(r.url, r);

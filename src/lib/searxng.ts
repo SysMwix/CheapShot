@@ -15,7 +15,7 @@ export interface SearchResult {
  * Search the web via SearXNG.
  * Returns up to `maxResults` results.
  */
-export async function webSearch(query: string, maxResults = 20): Promise<SearchResult[]> {
+export async function webSearch(query: string, maxResults = 30): Promise<SearchResult[]> {
   try {
     const params = new URLSearchParams({
       q: query,

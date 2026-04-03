@@ -118,6 +118,12 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
     for (const source of product.sources) {
       await fetch(`/api/products/${id}/sources/${source.id}`, { method: "DELETE" });
     }
+    // Reset excluded retailers
+    await fetch(`/api/products/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ excluded_retailers: "[]" }),
+    });
     setReview(null);
     await fetchData();
 

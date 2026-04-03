@@ -27,7 +27,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 export async function PUT(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = await request.json();
-  const { name, desired_price, currency, check_frequency, check_day, min_trust_score } = body;
+  const { name, desired_price, currency, check_frequency, check_day, min_trust_score, excluded_retailers } = body;
 
   const db = getDb();
   const existing = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as Product | undefined;
@@ -39,6 +39,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     `UPDATE products SET
        name = ?, desired_price = ?, currency = ?,
        check_frequency = ?, check_day = ?, min_trust_score = ?,
+       excluded_retailers = ?,
        updated_at = datetime('now')
      WHERE id = ?`
   ).run(
@@ -48,6 +49,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     check_frequency ?? existing.check_frequency,
     check_day !== undefined ? check_day : existing.check_day,
     min_trust_score !== undefined ? min_trust_score : existing.min_trust_score,
+    excluded_retailers !== undefined ? excluded_retailers : existing.excluded_retailers,
     id
   );
 
