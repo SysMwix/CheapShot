@@ -16,6 +16,9 @@ export interface SourceData {
   currency: string;
   trust_score: number | null;
   trust_summary: string | null;
+  variant_name: string | null;
+  available_variants_json: string | null;
+  review_summary: string | null;
 }
 
 export interface ProductCardData {
@@ -227,15 +230,20 @@ export default function ProductCard({
           <div className="space-y-1">
             {displaySources.map((source) => (
               <div key={source.id} className="flex items-center gap-2 py-1 group text-sm">
-                <a
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline truncate flex-shrink min-w-0"
-                  title={source.url}
-                >
-                  {source.retailer}
-                </a>
+                <div className="flex flex-col min-w-0 flex-shrink">
+                  <a
+                    href={source.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-500 hover:underline truncate"
+                    title={source.url}
+                  >
+                    {source.retailer}
+                  </a>
+                  {source.variant_name && (
+                    <span className="text-xs text-gray-400 truncate">{source.variant_name}</span>
+                  )}
+                </div>
                 {source.trust_score != null ? (
                   <Link
                     href={`/trust/${getDomain(source.url)}`}

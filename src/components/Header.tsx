@@ -2,25 +2,29 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { useRegion, REGIONS, TRUST_LEVELS } from "./RegionContext";
+import { useRegion, REGIONS, TRUST_LEVELS, SIZE_OPTIONS, SizePreferences } from "./RegionContext";
 
 export default function Header() {
-  const { region, setRegion, minTrust, setMinTrust } = useRegion();
+  const { region, setRegion, minTrust, setMinTrust, sizes, setSizes } = useRegion();
   const [openRegion, setOpenRegion] = useState(false);
   const [openTrust, setOpenTrust] = useState(false);
+  const [openSizes, setOpenSizes] = useState(false);
   const regionRef = useRef<HTMLDivElement>(null);
   const trustRef = useRef<HTMLDivElement>(null);
+  const sizesRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (regionRef.current && !regionRef.current.contains(e.target as Node)) setOpenRegion(false);
       if (trustRef.current && !trustRef.current.contains(e.target as Node)) setOpenTrust(false);
+      if (sizesRef.current && !sizesRef.current.contains(e.target as Node)) setOpenSizes(false);
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   const trustLabel = TRUST_LEVELS.find((t) => t.value === minTrust)?.label || "Any";
+  const activeSizeCount = Object.values(sizes).filter(Boolean).length;
 
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
@@ -29,6 +33,51 @@ export default function Header() {
       </Link>
 
       <div className="flex items-center gap-2">
+        {/* My Sizes selector */}
+        <div className="relative" ref={sizesRef}>
+          <button
+            onClick={() => setOpenSizes(!openSizes)}
+            className="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition"
+          >
+            <svg className="w-3.5 h-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+            <span className="text-gray-600">My Sizes</span>
+            {activeSizeCount > 0 && (
+              <span className="bg-emerald-100 text-emerald-700 text-xs font-semibold px-1.5 rounded-full">{activeSizeCount}</span>
+            )}
+            <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 10 6">
+              <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+
+          {openSizes && (
+            <div className="absolute right-0 mt-1 w-64 bg-white border rounded-lg shadow-lg z-50 p-3 max-h-80 overflow-y-auto">
+              <div className="text-xs text-gray-500 mb-2 font-medium">Default Sizes</div>
+              <div className="space-y-2">
+                {(Object.keys(SIZE_OPTIONS) as (keyof typeof SIZE_OPTIONS)[]).map((key) => {
+                  const opt = SIZE_OPTIONS[key];
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600 w-24 flex-shrink-0">{opt.label}</label>
+                      <select
+                        value={sizes[key as keyof SizePreferences]}
+                        onChange={(e) => setSizes({ ...sizes, [key]: e.target.value })}
+                        className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      >
+                        {opt.options.map((o) => (
+                          <option key={o} value={o}>{o || "Not set"}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-gray-400 mt-2">Sizes are used to filter search results and refine AI searches.</p>
+            </div>
+          )}
+        </div>
+
         {/* Trust score selector */}
         <div className="relative" ref={trustRef}>
           <button

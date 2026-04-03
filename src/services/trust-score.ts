@@ -26,10 +26,10 @@ const client = new Anthropic();
 export async function getTrustScore(retailer: string, url: string): Promise<TrustResult> {
   try {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
       system: "You evaluate online retailer trustworthiness. Respond ONLY with a JSON object.",
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
       messages: [
         {
           role: "user",
@@ -62,7 +62,11 @@ Rules: category scores 0-100, weights sum to 100, 4-8 factors sorted by severity
       .map((block) => block.text)
       .join("\n");
 
-    const cleaned = allText.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
+    const cleaned = allText
+      .replace(/<cite[^>]*>.*?<\/cite>/g, "")
+      .replace(/```json?\s*/g, "")
+      .replace(/```/g, "")
+      .trim();
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return fallback();
 

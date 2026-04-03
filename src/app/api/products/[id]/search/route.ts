@@ -9,7 +9,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function POST(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = await request.json().catch(() => ({}));
-  const { country, currency, excludeRetailers } = body;
+  const { country, currency, excludeRetailers, sizePrefs, searchHint } = body;
 
   const db = getDb();
   const product = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as Product | undefined;
@@ -29,7 +29,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
   db.prepare("UPDATE products SET search_status = 'searching', updated_at = datetime('now') WHERE id = ?").run(id);
 
   try {
-    // Combine: existing sources + blacklisted retailers + request exclusions
     const existingSources = db
       .prepare("SELECT retailer FROM product_sources WHERE product_id = ?")
       .all(id) as { retailer: string }[];
@@ -42,19 +41,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const slotsLeft = 10 - existingCount.count;
 
-    // AI finds retailers + Cheerio verifies live prices
     console.log(`[Search] Finding retailers for "${product.name}"...`);
     const verifiedOffers = await searchProducts(
       product.name,
       country,
       currency || product.currency,
-      allExcluded.length > 0 ? allExcluded : undefined
+      allExcluded.length > 0 ? allExcluded : undefined,
+      sizePrefs || undefined,
+      searchHint || undefined
     );
 
-    // Insert sources with verified prices
     const insertStmt = db.prepare(
-      `INSERT INTO product_sources (product_id, retailer, url, image_url, current_price, currency, last_checked_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+      `INSERT INTO product_sources (product_id, retailer, url, image_url, current_price, currency, variant_name, last_checked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     );
     const insertHistory = db.prepare(
       `INSERT INTO price_history (source_id, price) VALUES (?, ?)`
@@ -71,7 +70,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         offer.url,
         offer.image_url,
         offer.price,
-        offer.currency
+        offer.currency,
+        offer.variant || null
       );
       insertHistory.run(result.lastInsertRowid, offer.price);
       newSourceIds.push(Number(result.lastInsertRowid));
@@ -94,44 +94,98 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 }
 
+/**
+ * Score all sources concurrently with idempotency.
+ */
 async function scoreSources(sourceIds: number[]) {
   const db = getDb();
-  for (const sourceId of sourceIds) {
-    try {
-      const source = db.prepare("SELECT * FROM product_sources WHERE id = ?").get(sourceId) as ProductSource | undefined;
-      if (!source) continue;
 
-      const domain = extractDomain(source.url);
+  db.prepare(
+    "DELETE FROM trust_scoring_locks WHERE datetime(locked_at, '+5 minutes') < datetime('now')"
+  ).run();
 
-      // Check cache first (valid for 7 days)
-      const cached = db.prepare(
-        "SELECT * FROM trust_cache WHERE domain = ? AND datetime(checked_at, '+7 days') > datetime('now')"
-      ).get(domain) as { score: number; summary: string; details_json: string | null } | undefined;
+  await Promise.all(sourceIds.map((id) => scoreOneSource(db, id)));
+}
 
-      if (cached) {
-        db.prepare(
-          "UPDATE product_sources SET trust_score = ?, trust_summary = ? WHERE id = ?"
-        ).run(cached.score, cached.summary, sourceId);
-        console.log(`[Trust] ${source.retailer}: ${cached.score}/100 (cached)`);
-        continue;
-      }
+async function scoreOneSource(db: ReturnType<typeof getDb>, sourceId: number) {
+  try {
+    const source = db.prepare("SELECT * FROM product_sources WHERE id = ?").get(sourceId) as ProductSource | undefined;
+    if (!source) return;
 
-      // Fetch fresh detailed score
-      const result = await getTrustScore(source.retailer, source.url);
-      db.prepare(
-        "UPDATE product_sources SET trust_score = ?, trust_summary = ? WHERE id = ?"
-      ).run(result.score, result.summary, sourceId);
+    const domain = extractDomain(source.url);
 
-      // Update cache with full details
-      db.prepare(
-        "INSERT OR REPLACE INTO trust_cache (domain, retailer, score, summary, details_json, checked_at) VALUES (?, ?, ?, ?, ?, datetime('now'))"
-      ).run(domain, source.retailer, result.score, result.summary, JSON.stringify({ categories: result.categories, factors: result.factors }));
-
-      console.log(`[Trust] ${source.retailer}: ${result.score}/100`);
-    } catch (err) {
-      console.error(`[Trust] Failed for source ${sourceId}:`, err);
+    const cached = checkCache(db, domain);
+    if (cached) {
+      applyScore(db, sourceId, cached.score, cached.summary);
+      console.log(`[Trust] ${source.retailer}: ${cached.score}/100 (cached)`);
+      return;
     }
+
+    const gotLock = tryAcquireLock(db, domain);
+
+    if (gotLock) {
+      try {
+        const result = await getTrustScore(source.retailer, source.url);
+
+        db.prepare(
+          "INSERT OR REPLACE INTO trust_cache (domain, retailer, score, summary, details_json, checked_at) VALUES (?, ?, ?, ?, ?, datetime('now'))"
+        ).run(domain, source.retailer, result.score, result.summary, JSON.stringify({ categories: result.categories, factors: result.factors }));
+
+        applyScore(db, sourceId, result.score, result.summary);
+        console.log(`[Trust] ${source.retailer}: ${result.score}/100`);
+      } finally {
+        db.prepare("DELETE FROM trust_scoring_locks WHERE domain = ?").run(domain);
+      }
+    } else {
+      console.log(`[Trust] ${source.retailer}: waiting for another worker to score ${domain}...`);
+      const result = await waitForCache(db, domain);
+      if (result) {
+        applyScore(db, sourceId, result.score, result.summary);
+        console.log(`[Trust] ${source.retailer}: ${result.score}/100 (waited)`);
+      } else {
+        console.log(`[Trust] ${source.retailer}: timed out waiting for score`);
+      }
+    }
+  } catch (err) {
+    console.error(`[Trust] Failed for source ${sourceId}:`, err);
   }
+}
+
+function checkCache(db: ReturnType<typeof getDb>, domain: string) {
+  return db.prepare(
+    "SELECT score, summary, details_json FROM trust_cache WHERE domain = ? AND datetime(checked_at, '+7 days') > datetime('now')"
+  ).get(domain) as { score: number; summary: string; details_json: string | null } | undefined;
+}
+
+function tryAcquireLock(db: ReturnType<typeof getDb>, domain: string): boolean {
+  const result = db.prepare(
+    "INSERT OR IGNORE INTO trust_scoring_locks (domain, status, locked_at) VALUES (?, 'locked', datetime('now'))"
+  ).run(domain);
+  return result.changes > 0;
+}
+
+function applyScore(db: ReturnType<typeof getDb>, sourceId: number, score: number, summary: string) {
+  db.prepare(
+    "UPDATE product_sources SET trust_score = ?, trust_summary = ? WHERE id = ?"
+  ).run(score, summary, sourceId);
+}
+
+async function waitForCache(db: ReturnType<typeof getDb>, domain: string, maxWaitMs = 60000): Promise<{ score: number; summary: string } | null> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const cached = checkCache(db, domain);
+    if (cached) return cached;
+
+    const lock = db.prepare("SELECT * FROM trust_scoring_locks WHERE domain = ?").get(domain);
+    if (!lock) {
+      const finalCheck = checkCache(db, domain);
+      if (finalCheck) return finalCheck;
+      return null;
+    }
+
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return null;
 }
 
 function extractDomain(url: string): string {

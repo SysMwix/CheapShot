@@ -6,10 +6,11 @@ interface SearchBarProps {
   onSearch: (query: string) => void;
   onAdd: () => void;
   onRefreshAll: () => void;
+  onClearAll?: () => void;
   refreshing?: boolean;
 }
 
-export default function SearchBar({ onSearch, onAdd, onRefreshAll, refreshing }: SearchBarProps) {
+export default function SearchBar({ onSearch, onAdd, onRefreshAll, onClearAll, refreshing }: SearchBarProps) {
   const [query, setQuery] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
@@ -50,6 +51,15 @@ export default function SearchBar({ onSearch, onAdd, onRefreshAll, refreshing }:
           "Refresh All"
         )}
       </button>
+      {onClearAll && (
+        <button
+          onClick={onClearAll}
+          disabled={refreshing}
+          className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-sm font-medium transition disabled:opacity-50"
+        >
+          Clear All Prices
+        </button>
+      )}
       <button
         onClick={onAdd}
         className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition"

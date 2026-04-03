@@ -1,19 +1,31 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRegion } from "./RegionContext";
+import { useRegion, SizePreferences } from "./RegionContext";
+import { CATEGORIES, findSubcategory } from "@/lib/categories";
 import FrequencySelector from "./FrequencySelector";
 import type { CheckFrequency } from "@/lib/db";
+
+export interface AddProductResult {
+  productId: number;
+  category: string;
+  subcategory: string;
+  sizeKey?: string;
+  searchHint?: string;
+}
 
 interface AddProductModalProps {
   open: boolean;
   onClose: () => void;
-  onAdded: (productId: number) => void;
+  onAdded: (result: AddProductResult) => void;
+  defaultCategory?: string;
 }
 
-export default function AddProductModal({ open, onClose, onAdded }: AddProductModalProps) {
-  const { region, minTrust: globalMinTrust } = useRegion();
+export default function AddProductModal({ open, onClose, onAdded, defaultCategory }: AddProductModalProps) {
+  const { region, minTrust: globalMinTrust, sizes } = useRegion();
   const [name, setName] = useState("");
+  const [category, setCategory] = useState(defaultCategory || "");
+  const [subcategory, setSubcategory] = useState("");
   const [desiredPrice, setDesiredPrice] = useState("");
   const [checkFrequency, setCheckFrequency] = useState<CheckFrequency>("manual");
   const [checkDay, setCheckDay] = useState<number | null>(null);
@@ -21,10 +33,21 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Sync min trust with global default when modal opens
   useEffect(() => {
-    if (open) setMinTrust(globalMinTrust.toString());
-  }, [open, globalMinTrust]);
+    if (open) {
+      setMinTrust(globalMinTrust.toString());
+      setCategory(defaultCategory || "");
+      setSubcategory("");
+    }
+  }, [open, globalMinTrust, defaultCategory]);
+
+  useEffect(() => {
+    setSubcategory("");
+  }, [category]);
+
+  const selectedCategory = CATEGORIES.find((c) => c.slug === category);
+  const selectedSub = category && subcategory ? findSubcategory(category, subcategory) : undefined;
+  const savedSize = selectedSub?.sizeKey ? sizes[selectedSub.sizeKey as keyof SizePreferences] : "";
 
   if (!open) return null;
 
@@ -46,6 +69,8 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
           check_frequency: checkFrequency,
           check_day: checkDay,
           min_trust_score: parseInt(minTrust) || 0,
+          category: category || "misc",
+          subcategory: subcategory || "other",
         }),
       });
 
@@ -55,12 +80,21 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
       }
 
       const product = await res.json();
+      const result: AddProductResult = {
+        productId: product.id,
+        category: category || "misc",
+        subcategory: subcategory || "other",
+        sizeKey: selectedSub?.sizeKey,
+        searchHint: selectedSub?.searchHint,
+      };
       setName("");
       setDesiredPrice("");
+      setCategory(defaultCategory || "");
+      setSubcategory("");
       setCheckFrequency("manual");
       setCheckDay(null);
       setMinTrust("0");
-      onAdded(product.id);
+      onAdded(result);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -71,7 +105,7 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold">Track a Product</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
@@ -91,11 +125,54 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder='e.g. "Cardo Packtalk Edge"'
+              placeholder='e.g. "HJC RPHA 91"'
               className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               autoFocus
             />
           </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="">Any / General</option>
+              {CATEGORIES.map((c) => (
+                <option key={c.slug} value={c.slug}>{c.icon} {c.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {selectedCategory && (
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Type <span className="text-gray-400 font-normal">— refines search &amp; sizes</span>
+              </label>
+              <select
+                value={subcategory}
+                onChange={(e) => setSubcategory(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="">Not specified</option>
+                {selectedCategory.subcategories.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+              {selectedSub?.sizeKey && savedSize && (
+                <p className="text-xs text-emerald-600 mt-1">
+                  Will search for your saved size: {savedSize}
+                </p>
+              )}
+              {selectedSub?.sizeKey && !savedSize && (
+                <p className="text-xs text-gray-400 mt-1">
+                  No default size set for this — set one in &quot;My Sizes&quot; to auto-filter
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium mb-1">
               Target Price ({region.currency}) <span className="text-gray-400 font-normal">— optional</span>

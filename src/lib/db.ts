@@ -92,6 +92,11 @@ function migrate(db: Database.Database) {
   addColumnIfMissing(db, "product_sources", "previous_price", "REAL");
   addColumnIfMissing(db, "product_sources", "trust_score", "REAL");
   addColumnIfMissing(db, "product_sources", "trust_summary", "TEXT");
+  addColumnIfMissing(db, "product_sources", "variant_name", "TEXT");
+  addColumnIfMissing(db, "product_sources", "available_variants_json", "TEXT");
+  addColumnIfMissing(db, "product_sources", "review_summary", "TEXT");
+  addColumnIfMissing(db, "products", "category", "TEXT NOT NULL DEFAULT 'misc'");
+  addColumnIfMissing(db, "products", "subcategory", "TEXT NOT NULL DEFAULT 'other'");
   addColumnIfMissing(db, "trust_cache", "details_json", "TEXT");
 }
 
@@ -107,6 +112,8 @@ export interface Product {
   check_day: number | null;
   min_trust_score: number;
   excluded_retailers: string; // JSON array string
+  category: string;
+  subcategory: string;
   created_at: string;
   updated_at: string;
 }
@@ -122,6 +129,9 @@ export interface ProductSource {
   currency: string;
   trust_score: number | null;
   trust_summary: string | null;
+  variant_name: string | null;
+  available_variants_json: string | null;
+  review_summary: string | null;
   last_checked_at: string | null;
   created_at: string;
 }
