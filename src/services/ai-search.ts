@@ -11,7 +11,20 @@ export interface ProductOffer {
 
 const client = new Anthropic();
 
-export async function searchProducts(query: string): Promise<ProductOffer[]> {
+export async function searchProducts(
+  query: string,
+  country?: string,
+  currency?: string,
+  excludeRetailers?: string[]
+): Promise<ProductOffer[]> {
+  const region = country || "United States";
+  const curr = currency || "USD";
+
+  const exclusionNote =
+    excludeRetailers && excludeRetailers.length > 0
+      ? `\n\nDO NOT include results from these retailers: ${excludeRetailers.join(", ")}. Find alternatives from other stores instead.`
+      : "";
+
   const response = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 4096,
@@ -27,34 +40,34 @@ export async function searchProducts(query: string): Promise<ProductOffer[]> {
         role: "user",
         content: `I want to buy: "${query}"
 
-Search the web to find where I can buy this product right now. Look for current prices from online retailers.
+I'm shopping from ${region}. Search for this product on retailers that ship to ${region} and show prices in ${curr}.
+
+Search the web to find where I can buy this product right now. Prioritize local/regional retailers for ${region}.${exclusionNote}
 
 After searching, respond with ONLY a JSON array (no other text, no markdown fences) of offers you found. Each offer object must have these exact fields:
 {
   "name": "full product name",
   "price": 123.99,
-  "currency": "USD",
+  "currency": "${curr}",
   "url": "https://direct-link-to-product-page",
   "retailer": "Store Name",
   "image_url": "https://image-url-or-null"
 }
 
 Rules:
-- price must be a number, not a string
+- price must be a number in ${curr}, not a string
 - Only include offers where you found a real price
-- Find up to 5 offers from different stores
+- Find up to 5 offers from different stores available in ${region}
 - If you can't find any offers, return an empty array: []`,
       },
     ],
   });
 
-  // Log all content blocks for debugging
   console.log(
     "[AI Search] Response blocks:",
     response.content.map((b) => b.type)
   );
 
-  // Collect ALL text blocks (there may be multiple)
   const allText = response.content
     .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
@@ -68,7 +81,6 @@ Rules:
   }
 
   try {
-    // Try to extract JSON array — handle markdown code fences too
     const cleaned = allText.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
     const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {

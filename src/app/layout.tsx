@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { RegionProvider } from "@/components/RegionContext";
+import Header from "@/components/Header";
 
 export const metadata: Metadata = {
   title: "CheapShot - Price Tracker",
@@ -14,12 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-gray-50 text-gray-900 min-h-screen">
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Cheap<span className="text-emerald-600">Shot</span>
-          </h1>
-        </header>
-        <main className="max-w-6xl mx-auto px-4 py-8">{children}</main>
+        <RegionProvider>
+          <Header />
+          <main className="max-w-6xl mx-auto px-4 py-8">{children}</main>
+        </RegionProvider>
       </body>
     </html>
   );

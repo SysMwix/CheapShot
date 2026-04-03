@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRegion } from "./RegionContext";
 
 interface ProductOffer {
   name: string;
@@ -19,6 +20,7 @@ interface AddProductModalProps {
 }
 
 export default function AddProductModal({ open, onClose, onAdded, initialQuery = "" }: AddProductModalProps) {
+  const { region } = useRegion();
   const [step, setStep] = useState<"search" | "results" | "confirm">("search");
   const [query, setQuery] = useState(initialQuery);
   const [searching, setSearching] = useState(false);
@@ -64,7 +66,11 @@ export default function AddProductModal({ open, onClose, onAdded, initialQuery =
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query.trim() }),
+        body: JSON.stringify({
+          query: query.trim(),
+          country: region.name,
+          currency: region.currency,
+        }),
       });
 
       if (!res.ok) {
