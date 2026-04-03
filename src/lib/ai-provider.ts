@@ -65,7 +65,7 @@ export async function queryOllama(
           num_predict: 1024,
         },
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!res.ok) {
@@ -110,7 +110,7 @@ export async function queryOllamaJson(
           num_predict: 2048,
         },
       }),
-      signal: AbortSignal.timeout(90000),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!res.ok) {

@@ -3,6 +3,7 @@ import "./globals.css";
 import { RegionProvider } from "@/components/RegionContext";
 import Header from "@/components/Header";
 import CategoryNav from "@/components/CategoryNav";
+import ShoppingChatWidget from "@/components/ShoppingChatWidget";
 
 export const metadata: Metadata = {
   title: "CheapShot - Price Tracker",
@@ -23,6 +24,7 @@ export default function RootLayout({
             <CategoryNav />
           </div>
           <main className="max-w-6xl mx-auto px-4 py-6">{children}</main>
+          <ShoppingChatWidget />
         </RegionProvider>
       </body>
     </html>

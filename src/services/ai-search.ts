@@ -66,8 +66,13 @@ export async function searchProducts(
   console.log(`[Search] ${allResults.size} results -> ${filtered.length} after domain filter`);
   if (filtered.length === 0) return [];
 
-  // Ollama identifies actual product pages
-  const offers = await askOllamaToFilter(filtered, query, curr, sizePrefs);
+  // Ollama identifies actual product pages — fall back to URL patterns if it fails
+  let offers = await askOllamaToFilter(filtered, query, curr, sizePrefs);
+
+  if (offers.length === 0) {
+    console.log(`[Search] Ollama found nothing, trying URL pattern fallback...`);
+    offers = fallbackUrlFilter(filtered, query, curr);
+  }
 
   if (offers.length === 0) {
     console.log(`[Search] No product pages identified`);
@@ -149,29 +154,20 @@ async function askOllamaToFilter(
   }
   const sizeNote = sizeHints.length > 0 ? `\nUser sizes: ${sizeHints.join(", ")}.` : "";
 
-  const resultsList = results.slice(0, 20).map((r, i) =>
-    `${i + 1}. ${r.title} | ${r.url} | ${r.content.substring(0, 80)}`
+  const topResults = results.slice(0, 10);
+  const resultsList = topResults.map((r, i) =>
+    `${i + 1}. ${r.title} | ${r.url}`
   ).join("\n");
 
-  console.log(`[Search] Asking Ollama to analyse ${Math.min(results.length, 20)} results...`);
+  console.log(`[Search] Asking Ollama to analyse ${topResults.length} results...`);
 
   const data = await queryOllamaJson(
-    `You identify product pages from search results. You must return a JSON object with a "products" array.`,
-    `I want to buy: "${productName}"
-
-Here are search results. Pick ONLY the ones that are online shop pages where I can BUY this exact product or a very close match. Include product pages AND category pages from real shops if they clearly sell this item.
-${sizeNote}
+    `Pick online shop URLs where I can buy a product. Return {"products":[{"name":"...","url":"...","retailer":"..."}]}`,
+    `Product: "${productName}"${sizeNote}
 
 ${resultsList}
 
-Return JSON: {"products": [{"name": "product name on page", "price": 0, "currency": "${currency}", "url": "the url", "retailer": "shop name", "variant": null}]}
-
-Rules:
-- Include pages from real online shops that sell this product
-- A "graphic kit", "sticker", or unrelated accessory is NOT the product
-- Review sites, forums, blogs, and news articles are NOT shops
-- Set price to 0 if you can't see it in the snippet
-- If NONE are relevant, return {"products": []}`
+Which are real shop pages selling this product? Ignore reviews, blogs, forums, stickers, accessories. Return {"products":[]}} if none.`
   );
 
   if (!data || typeof data !== "object") {
@@ -199,6 +195,47 @@ Rules:
       variant: o.variant ? String(o.variant) : undefined,
     }))
     .filter((o) => o.name && o.url && o.url.startsWith("http"));
+}
+
+/** Fallback: pick URLs that look like product pages based on URL patterns */
+function fallbackUrlFilter(
+  results: { title: string; url: string; content: string }[],
+  productName: string,
+  currency: string
+): ProductOffer[] {
+  const SHOP_PATTERNS = [
+    /\/product[s]?\//i, /\/p\//i, /\/buy\//i, /\/item\//i,
+    /\/content_prod\//i, /\/dp\//i, /\/gp\/product/i,
+    /\/(helmet|glove|jacket|boot|intercom|exhaust|tyre|brake)/i,
+  ];
+  const NON_SHOP = [
+    /\/blog\//i, /\/news\//i, /\/review[s]?\//i, /\/article/i,
+    /\/forum/i, /\/wiki/i, /\/guide/i, /\/best-/i, /\/top-\d/i,
+  ];
+
+  const nameWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+  return results
+    .filter((r) => {
+      const urlLower = r.url.toLowerCase();
+      if (NON_SHOP.some((p) => p.test(urlLower))) return false;
+      const titleLower = r.title.toLowerCase();
+      // Title must contain at least one word from the product name
+      const hasMatch = nameWords.some((w) => titleLower.includes(w));
+      if (!hasMatch) return false;
+      // URL looks like a product page OR title contains price-like text
+      return SHOP_PATTERNS.some((p) => p.test(urlLower)) || /£\d/.test(r.title + r.content);
+    })
+    .slice(0, 8)
+    .map((r) => ({
+      name: r.title,
+      price: 0,
+      currency,
+      url: r.url,
+      retailer: extractRetailerFromUrl(r.url),
+      image_url: undefined,
+      variant: undefined,
+    }));
 }
 
 function extractRetailerFromUrl(url: string): string {

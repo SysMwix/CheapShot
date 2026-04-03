@@ -69,6 +69,15 @@ export default function ProductGrid({ categoryFilter, defaultAddCategory }: Prod
     fetchProducts();
   }, [fetchProducts]);
 
+  // Listen for products added from the chat widget
+  useEffect(() => {
+    function handleChatAdd() {
+      fetchProducts();
+    }
+    window.addEventListener("cheapshot-product-added", handleChatAdd);
+    return () => window.removeEventListener("cheapshot-product-added", handleChatAdd);
+  }, [fetchProducts]);
+
   // Re-apply search + trust filters
   useEffect(() => {
     let result = products;
