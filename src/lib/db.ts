@@ -71,6 +71,16 @@ function migrate(db: Database.Database) {
       checked_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // Incremental migrations — safely add columns to existing tables
+  addColumnIfMissing(db, "products", "min_trust_score", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "products", "excluded_retailers", "TEXT NOT NULL DEFAULT '[]'");
+  addColumnIfMissing(db, "products", "check_frequency", "TEXT NOT NULL DEFAULT 'manual'");
+  addColumnIfMissing(db, "products", "check_day", "INTEGER");
+  addColumnIfMissing(db, "product_sources", "previous_price", "REAL");
+  addColumnIfMissing(db, "product_sources", "trust_score", "REAL");
+  addColumnIfMissing(db, "product_sources", "trust_summary", "TEXT");
+  addColumnIfMissing(db, "trust_cache", "details_json", "TEXT");
 }
 
 export type CheckFrequency = "manual" | "daily" | "weekly" | "monthly";
