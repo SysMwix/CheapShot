@@ -5,6 +5,7 @@ import { useRegion } from "@/components/RegionContext";
 import SearchBar from "@/components/SearchBar";
 import ProductCard, { ProductCardData } from "@/components/ProductCard";
 import AddProductModal from "@/components/AddProductModal";
+import type { CheckFrequency } from "@/lib/db";
 
 export default function Dashboard() {
   const { region } = useRegion();
@@ -12,6 +13,7 @@ export default function Dashboard() {
   const [filtered, setFiltered] = useState<ProductCardData[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshingAll, setRefreshingAll] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
 
   const fetchProducts = useCallback(async () => {
@@ -135,6 +137,41 @@ export default function Dashboard() {
     triggerSearch(productId);
   }
 
+  async function handleRefreshAll() {
+    const withSources = products.filter((p) => p.sources.length > 0 && p.search_status !== "searching");
+    if (withSources.length === 0) return;
+
+    setRefreshingAll(true);
+
+    // Mark all as searching for instant UI feedback
+    const ids = new Set(withSources.map((p) => p.id));
+    setProducts((prev) => prev.map((p) => ids.has(p.id) ? { ...p, search_status: "searching" } : p));
+    setFiltered((prev) => prev.map((p) => ids.has(p.id) ? { ...p, search_status: "searching" } : p));
+
+    // Refresh all in parallel
+    await Promise.all(
+      withSources.map((p) =>
+        fetch(`/api/products/${p.id}/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ country: region.name, currency: region.currency }),
+        }).catch((err) => console.error(`Refresh failed for ${p.name}:`, err))
+      )
+    );
+
+    await fetchProducts();
+    setRefreshingAll(false);
+  }
+
+  async function handleUpdateFrequency(productId: number, frequency: CheckFrequency, checkDay: number | null) {
+    await fetch(`/api/products/${productId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ check_frequency: frequency, check_day: checkDay }),
+    });
+    await fetchProducts();
+  }
+
   async function handleDelete(id: number) {
     await fetch(`/api/products/${id}`, { method: "DELETE" });
     await fetchProducts();
@@ -142,7 +179,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <SearchBar onSearch={handleSearch} onAdd={() => setShowModal(true)} />
+      <SearchBar onSearch={handleSearch} onAdd={() => setShowModal(true)} onRefreshAll={handleRefreshAll} refreshing={refreshingAll} />
 
       {loading ? (
         <div className="text-center text-gray-400 py-12">Loading...</div>
@@ -166,6 +203,7 @@ export default function Dashboard() {
               onRemoveSource={handleRemoveSource}
               onFindMore={handleFindMore}
               onRefresh={handleRefresh}
+              onUpdateFrequency={handleUpdateFrequency}
             />
           ))}
         </div>

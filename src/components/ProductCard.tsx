@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import Sparkline from "./Sparkline";
+import FrequencySelector from "./FrequencySelector";
+import type { CheckFrequency } from "@/lib/db";
 
 export interface SourceData {
   id: number;
@@ -9,7 +12,10 @@ export interface SourceData {
   url: string;
   image_url: string | null;
   current_price: number | null;
+  previous_price: number | null;
   currency: string;
+  trust_score: number | null;
+  trust_summary: string | null;
 }
 
 export interface ProductCardData {
@@ -18,6 +24,8 @@ export interface ProductCardData {
   desired_price: number | null;
   currency: string;
   search_status: string;
+  check_frequency: CheckFrequency;
+  check_day: number | null;
   sources: SourceData[];
   best_price: number | null;
   priceHistory: number[];
@@ -29,6 +37,7 @@ interface ProductCardProps {
   onRemoveSource: (productId: number, sourceId: number) => void;
   onFindMore: (productId: number) => void;
   onRefresh: (productId: number) => void;
+  onUpdateFrequency: (productId: number, frequency: CheckFrequency, checkDay: number | null) => void;
 }
 
 function getTrend(history: number[]): "up" | "down" | "stable" {
@@ -43,8 +52,26 @@ function getTrend(history: number[]): "up" | "down" | "stable" {
 const trendIcons = { up: "\u2191", down: "\u2193", stable: "\u2192" };
 const trendColors = { up: "text-red-500", down: "text-emerald-500", stable: "text-gray-400" };
 
-export default function ProductCard({ product, onDelete, onRemoveSource, onFindMore, onRefresh }: ProductCardProps) {
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function frequencyLabel(freq: CheckFrequency, day: number | null): string {
+  if (freq === "daily") return "Daily";
+  if (freq === "weekly" && day != null) return `Every ${DAYS[day]}`;
+  if (freq === "monthly" && day != null) return `${ordinal(day)} of month`;
+  return "Manual";
+}
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+export default function ProductCard({
+  product, onDelete, onRemoveSource, onFindMore, onRefresh, onUpdateFrequency,
+}: ProductCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [editFreq, setEditFreq] = useState(false);
   const isSearching = product.search_status === "searching" || product.search_status === "pending";
   const isAlert = product.best_price != null && product.desired_price != null && product.best_price <= product.desired_price;
   const trend = getTrend(product.priceHistory);
@@ -66,7 +93,37 @@ export default function ProductCard({ product, onDelete, onRemoveSource, onFindM
                 Price Alert!
               </span>
             )}
-            <h3 className="font-semibold text-sm">{product.name}</h3>
+            <Link href={`/product/${product.id}`} className="font-semibold text-sm hover:text-emerald-600 transition">
+              {product.name}
+            </Link>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {!editFreq ? (
+                <button
+                  onClick={() => setEditFreq(true)}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition"
+                >
+                  {frequencyLabel(product.check_frequency, product.check_day)}
+                </button>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <FrequencySelector
+                    frequency={product.check_frequency}
+                    checkDay={product.check_day}
+                    onChange={(freq, day) => {
+                      onUpdateFrequency(product.id, freq, day);
+                      setEditFreq(false);
+                    }}
+                    compact
+                  />
+                  <button
+                    onClick={() => setEditFreq(false)}
+                    className="text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    &times;
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <button
             onClick={() => onDelete(product.id)}
@@ -134,10 +191,7 @@ export default function ProductCard({ product, onDelete, onRemoveSource, onFindM
           </div>
           <div className="space-y-1">
             {displaySources.map((source) => (
-              <div
-                key={source.id}
-                className="flex items-center gap-2 py-1 group text-sm"
-              >
+              <div key={source.id} className="flex items-center gap-2 py-1 group text-sm">
                 <a
                   href={source.url}
                   target="_blank"
@@ -147,6 +201,22 @@ export default function ProductCard({ product, onDelete, onRemoveSource, onFindM
                 >
                   {source.retailer}
                 </a>
+                {source.trust_score != null ? (
+                  <span
+                    className={`relative group text-xs px-1 rounded cursor-help ${
+                      source.trust_score >= 70 ? "bg-emerald-100 text-emerald-700" :
+                      source.trust_score >= 50 ? "bg-yellow-100 text-yellow-700" :
+                      "bg-red-100 text-red-700"
+                    }`}
+                  >
+                    {source.trust_score}
+                    {source.trust_summary && (
+                      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-52 p-1.5 bg-gray-900 text-white text-xs rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 pointer-events-none font-normal">
+                        {source.trust_summary}
+                      </span>
+                    )}
+                  </span>
+                ) : null}
                 <span className="flex-1" />
                 <span className="font-medium whitespace-nowrap">
                   {source.current_price != null
@@ -167,18 +237,12 @@ export default function ProductCard({ product, onDelete, onRemoveSource, onFindM
           </div>
 
           {hasMore && !expanded && (
-            <button
-              onClick={() => setExpanded(true)}
-              className="text-xs text-gray-400 hover:text-gray-600 mt-1"
-            >
+            <button onClick={() => setExpanded(true)} className="text-xs text-gray-400 hover:text-gray-600 mt-1">
               +{product.sources.length - 3} more...
             </button>
           )}
           {expanded && hasMore && (
-            <button
-              onClick={() => setExpanded(false)}
-              className="text-xs text-gray-400 hover:text-gray-600 mt-1"
-            >
+            <button onClick={() => setExpanded(false)} className="text-xs text-gray-400 hover:text-gray-600 mt-1">
               Show less
             </button>
           )}

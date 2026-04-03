@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRegion } from "./RegionContext";
+import FrequencySelector from "./FrequencySelector";
+import type { CheckFrequency } from "@/lib/db";
 
 interface AddProductModalProps {
   open: boolean;
@@ -13,6 +15,8 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
   const { region } = useRegion();
   const [name, setName] = useState("");
   const [desiredPrice, setDesiredPrice] = useState("");
+  const [checkFrequency, setCheckFrequency] = useState<CheckFrequency>("manual");
+  const [checkDay, setCheckDay] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -33,6 +37,8 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
           name: name.trim(),
           desired_price: desiredPrice ? parseFloat(desiredPrice) : null,
           currency: region.currency,
+          check_frequency: checkFrequency,
+          check_day: checkDay,
         }),
       });
 
@@ -44,6 +50,8 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
       const product = await res.json();
       setName("");
       setDesiredPrice("");
+      setCheckFrequency("manual");
+      setCheckDay(null);
       onAdded(product.id);
       onClose();
     } catch (err) {
@@ -58,10 +66,7 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
       <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold">Track a Product</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
             &times;
           </button>
         </div>
@@ -95,6 +100,17 @@ export default function AddProductModal({ open, onClose, onAdded }: AddProductMo
               onChange={(e) => setDesiredPrice(e.target.value)}
               placeholder="Leave blank to set later"
               className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Check Frequency</label>
+            <FrequencySelector
+              frequency={checkFrequency}
+              checkDay={checkDay}
+              onChange={(freq, day) => {
+                setCheckFrequency(freq);
+                setCheckDay(day);
+              }}
             />
           </div>
           <button

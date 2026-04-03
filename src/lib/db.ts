@@ -21,8 +21,10 @@ function migrate(db: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       desired_price REAL,
-      currency TEXT NOT NULL DEFAULT 'USD',
+      currency TEXT NOT NULL DEFAULT 'GBP',
       search_status TEXT NOT NULL DEFAULT 'pending',
+      check_frequency TEXT NOT NULL DEFAULT 'manual',
+      check_day INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -34,7 +36,10 @@ function migrate(db: Database.Database) {
       url TEXT NOT NULL,
       image_url TEXT,
       current_price REAL,
-      currency TEXT NOT NULL DEFAULT 'USD',
+      previous_price REAL,
+      currency TEXT NOT NULL DEFAULT 'GBP',
+      trust_score REAL,
+      trust_summary TEXT,
       last_checked_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
@@ -47,8 +52,18 @@ function migrate(db: Database.Database) {
       checked_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (source_id) REFERENCES product_sources(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS trust_cache (
+      domain TEXT PRIMARY KEY,
+      retailer TEXT NOT NULL,
+      score REAL NOT NULL,
+      summary TEXT,
+      checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
+
+export type CheckFrequency = "manual" | "daily" | "weekly" | "monthly";
 
 export interface Product {
   id: number;
@@ -56,6 +71,8 @@ export interface Product {
   desired_price: number | null;
   currency: string;
   search_status: "pending" | "searching" | "done" | "error";
+  check_frequency: CheckFrequency;
+  check_day: number | null; // 0-6 for weekly (0=Sun), 1-31 for monthly
   created_at: string;
   updated_at: string;
 }
@@ -67,7 +84,10 @@ export interface ProductSource {
   url: string;
   image_url: string | null;
   current_price: number | null;
+  previous_price: number | null;
   currency: string;
+  trust_score: number | null;
+  trust_summary: string | null;
   last_checked_at: string | null;
   created_at: string;
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb, Product } from "@/lib/db";
+import { getDb, Product, ProductSource } from "@/lib/db";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -15,16 +15,19 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   const sources = db
     .prepare("SELECT * FROM product_sources WHERE product_id = ? ORDER BY current_price ASC")
-    .all(id);
+    .all(id) as ProductSource[];
 
-  return NextResponse.json({ ...product, sources });
+  const prices = sources.filter((s) => s.current_price != null).map((s) => s.current_price!);
+  const best_price = prices.length > 0 ? Math.min(...prices) : null;
+
+  return NextResponse.json({ ...product, sources, best_price });
 }
 
 // PUT /api/products/[id]
 export async function PUT(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = await request.json();
-  const { name, desired_price, currency } = body;
+  const { name, desired_price, currency, check_frequency, check_day } = body;
 
   const db = getDb();
   const existing = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as Product | undefined;
@@ -33,8 +36,19 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   }
 
   db.prepare(
-    "UPDATE products SET name = ?, desired_price = ?, currency = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(name ?? existing.name, desired_price ?? existing.desired_price, currency ?? existing.currency, id);
+    `UPDATE products SET
+       name = ?, desired_price = ?, currency = ?,
+       check_frequency = ?, check_day = ?,
+       updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(
+    name ?? existing.name,
+    desired_price ?? existing.desired_price,
+    currency ?? existing.currency,
+    check_frequency ?? existing.check_frequency,
+    check_day !== undefined ? check_day : existing.check_day,
+    id
+  );
 
   const updated = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as Product;
   return NextResponse.json(updated);

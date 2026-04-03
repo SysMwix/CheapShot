@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { useRegion, REGIONS } from "./RegionContext";
 
 export default function Header() {
@@ -20,9 +21,9 @@ export default function Header() {
 
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-      <h1 className="text-2xl font-bold tracking-tight">
+      <Link href="/" className="text-2xl font-bold tracking-tight hover:opacity-80 transition">
         Cheap<span className="text-emerald-600">Shot</span>
-      </h1>
+      </Link>
 
       <div className="relative" ref={ref}>
         <button
