@@ -1,16 +1,11 @@
 /**
- * AI Provider abstraction.
- * Routes requests to either a local Ollama instance or Claude API.
- *
- * - Ollama: Used for price extraction from HTML (no web search needed)
- * - Claude: Used for web search tasks (AI search, trust scoring, reviews)
- *
- * If Ollama is unavailable, falls back to Claude automatically.
+ * AI Provider — Ollama (local inference).
+ * All AI tasks route through here.
  */
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:3b";
-const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== "false"; // enabled by default if URL is set
+const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== "false";
 
 interface OllamaResponse {
   model: string;
@@ -21,13 +16,9 @@ interface OllamaResponse {
   done: boolean;
 }
 
-/**
- * Check if Ollama is reachable.
- * Caches the result for 60 seconds to avoid hammering the health endpoint.
- */
 let ollamaHealthy: boolean | null = null;
 let lastHealthCheck = 0;
-const HEALTH_CHECK_INTERVAL = 60000; // 1 minute
+const HEALTH_CHECK_INTERVAL = 60000;
 
 async function isOllamaAvailable(): Promise<boolean> {
   if (!OLLAMA_ENABLED) return false;
@@ -50,8 +41,7 @@ async function isOllamaAvailable(): Promise<boolean> {
 }
 
 /**
- * Send a prompt to Ollama and get a text response.
- * Used for simple extraction tasks (price from HTML, variant extraction).
+ * Query Ollama and get a text response.
  */
 export async function queryOllama(
   systemPrompt: string,
@@ -71,11 +61,11 @@ export async function queryOllama(
         ],
         stream: false,
         options: {
-          temperature: 0.1,  // Low temp for structured extraction
-          num_predict: 512,   // Keep responses short
+          temperature: 0.1,
+          num_predict: 1024,
         },
       }),
-      signal: AbortSignal.timeout(30000), // 30s timeout
+      signal: AbortSignal.timeout(60000),
     });
 
     if (!res.ok) {
@@ -87,7 +77,6 @@ export async function queryOllama(
     return data.message?.content || null;
   } catch (err) {
     console.log(`[Ollama] Failed:`, (err as Error).message?.substring(0, 80));
-    // Mark as unhealthy so we don't keep trying
     ollamaHealthy = false;
     lastHealthCheck = Date.now();
     return null;
@@ -95,11 +84,55 @@ export async function queryOllama(
 }
 
 /**
- * Check which provider is active.
- * Useful for logging and monitoring.
+ * Query Ollama with forced JSON output.
+ * Uses Ollama's native JSON mode — guarantees valid JSON response.
  */
-export async function getActiveProvider(): Promise<"ollama" | "claude"> {
-  return (await isOllamaAvailable()) ? "ollama" : "claude";
+export async function queryOllamaJson(
+  systemPrompt: string,
+  userPrompt: string
+): Promise<Record<string, unknown> | Record<string, unknown>[] | null> {
+  if (!(await isOllamaAvailable())) return null;
+
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        stream: false,
+        format: "json",
+        options: {
+          temperature: 0.1,
+          num_predict: 2048,
+        },
+      }),
+      signal: AbortSignal.timeout(90000),
+    });
+
+    if (!res.ok) {
+      console.log(`[Ollama] HTTP ${res.status}`);
+      return null;
+    }
+
+    const data = (await res.json()) as OllamaResponse;
+    const content = data.message?.content;
+    if (!content) return null;
+
+    return JSON.parse(content);
+  } catch (err) {
+    console.log(`[Ollama JSON] Failed:`, (err as Error).message?.substring(0, 80));
+    ollamaHealthy = false;
+    lastHealthCheck = Date.now();
+    return null;
+  }
+}
+
+export async function getActiveProvider(): Promise<"ollama" | "none"> {
+  return (await isOllamaAvailable()) ? "ollama" : "none";
 }
 
 export { OLLAMA_URL, OLLAMA_MODEL, OLLAMA_ENABLED };

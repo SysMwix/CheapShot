@@ -1,32 +1,27 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic();
+import { queryOllama } from "@/lib/ai-provider";
 
 export interface ReviewSummary {
   summary: string;
   pros: string[];
   cons: string[];
-  rating: number | null; // 1-5
+  rating: number | null;
   verdict: string;
 }
 
 /**
- * Use Claude with web search to generate a review summary for a product.
+ * Generate a review summary using Ollama (local AI).
+ * Uses the model's training knowledge about the product.
+ * No web search — based on what the model knows.
  */
 export async function getReviewSummary(productName: string): Promise<ReviewSummary> {
   try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      system: "You summarise product reviews from across the web. Respond with ONLY a JSON object.",
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
-      messages: [{
-        role: "user",
-        content: `Search for reviews of "${productName}" and provide a balanced summary.
+    const result = await queryOllama(
+      "You summarise product reviews based on your knowledge. Respond with ONLY a JSON object.",
+      `Based on your knowledge of "${productName}", provide a balanced review summary.
 
 Return ONLY this JSON:
 {
-  "summary": "2-3 sentence overall summary of what reviewers think",
+  "summary": "2-3 sentence overall summary of what reviewers typically think",
   "pros": ["pro 1", "pro 2", "pro 3"],
   "cons": ["con 1", "con 2", "con 3"],
   "rating": 4.2,
@@ -34,22 +29,21 @@ Return ONLY this JSON:
 }
 
 Rules:
-- Base this on REAL reviews from multiple sources
-- rating is the average rating out of 5 (null if not enough data)
-- Be honest about cons — don't sugarcoat
+- rating is out of 5 (null if you don't know enough about this product)
+- Be honest about cons
 - Keep pros/cons to 3-5 items each
-- ONLY output the JSON`,
-      }],
-    });
+- If you don't know this product well, say so in the summary and set rating to null
+- ONLY output the JSON`
+    );
 
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text).join("");
+    if (!result) {
+      return { summary: "Ollama unavailable — cannot generate review.", pros: [], cons: [], rating: null, verdict: "" };
+    }
 
-    const cleaned = text.replace(/<cite[^>]*>.*?<\/cite>/g, "").replace(/```json?\s*/g, "").replace(/```/g, "").trim();
+    const cleaned = result.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) {
-      return { summary: "Unable to find reviews.", pros: [], cons: [], rating: null, verdict: "" };
+      return { summary: "Unable to parse review.", pros: [], cons: [], rating: null, verdict: "" };
     }
 
     const parsed = JSON.parse(match[0]);
@@ -62,6 +56,6 @@ Rules:
     };
   } catch (err) {
     console.error("[ReviewSummary] Failed:", err);
-    return { summary: "Unable to fetch reviews at this time.", pros: [], cons: [], rating: null, verdict: "" };
+    return { summary: "Unable to generate review at this time.", pros: [], cons: [], rating: null, verdict: "" };
   }
 }

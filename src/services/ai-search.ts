@@ -1,4 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { webSearch } from "@/lib/searxng";
+import { queryOllamaJson } from "@/lib/ai-provider";
 import { extractPriceFromUrl } from "./price-extractor";
 
 export interface ProductOffer {
@@ -11,9 +12,13 @@ export interface ProductOffer {
   variant?: string;
 }
 
-const client = new Anthropic();
-
-const ALWAYS_EXCLUDE = ["Idealo", "PriceRunner", "Google Shopping", "Kelkoo", "PriceSpy"];
+// Only block obvious non-shopping domains — let Ollama decide the rest
+const BLOCKED_DOMAINS = [
+  "reddit.com", "facebook.com", "twitter.com", "x.com", "instagram.com",
+  "youtube.com", "tiktok.com", "pinterest.com", "linkedin.com",
+  "wikipedia.org", "wikihow.com", "quora.com", "zhihu.com", "baidu.com",
+  "trustpilot.com",
+];
 
 export interface SizePrefs {
   [key: string]: string | undefined;
@@ -21,19 +26,102 @@ export interface SizePrefs {
 
 export async function searchProducts(
   query: string,
-  country?: string,
+  _country?: string,
   currency?: string,
   excludeRetailers?: string[],
   sizePrefs?: SizePrefs,
   searchHint?: string
 ): Promise<ProductOffer[]> {
-  const region = country || "United Kingdom";
   const curr = currency || "GBP";
 
-  const allExcluded = [...ALWAYS_EXCLUDE, ...(excludeRetailers || [])];
-  const exclusionNote = `\nExclude these sites: ${allExcluded.join(", ")}.`;
+  // Search the web
+  const searchQueries = [
+    `${query} buy UK`,
+    `${query} price £`,
+    `${query} shop`,
+  ];
+  if (searchHint) {
+    searchQueries.push(`${query} ${searchHint}`);
+  }
 
-  // Build size hints from user preferences
+  console.log(`[Search] Searching for "${query}" via SearXNG...`);
+  const allResults = new Map<string, { title: string; url: string; content: string }>();
+
+  for (const sq of searchQueries) {
+    const results = await webSearch(sq, 15);
+    for (const r of results) {
+      if (!allResults.has(r.url)) {
+        allResults.set(r.url, r);
+      }
+    }
+  }
+
+  if (allResults.size === 0) {
+    console.log(`[Search] No results found`);
+    return [];
+  }
+
+  // Light filter — only remove social media and non-shopping sites
+  const userExcluded = (excludeRetailers || []).map((r) => r.toLowerCase());
+  const filtered = Array.from(allResults.values()).filter((r) => {
+    const urlLower = r.url.toLowerCase();
+    if (BLOCKED_DOMAINS.some((d) => urlLower.includes(d))) return false;
+    if (userExcluded.some((ex) => urlLower.includes(ex))) return false;
+    return true;
+  });
+
+  console.log(`[Search] ${allResults.size} results -> ${filtered.length} after domain filter`);
+
+  if (filtered.length === 0) return [];
+
+  // Let Ollama identify which results are actual product pages for this exact product
+  const offers = await askOllamaToFilter(filtered, query, curr, sizePrefs);
+
+  if (offers.length === 0) {
+    console.log(`[Search] No product pages identified by Ollama`);
+    return [];
+  }
+
+  // Verify prices on live pages
+  console.log(`[Search] Verifying ${offers.length} prices...`);
+  const verified = await Promise.all(
+    offers.map(async (offer) => {
+      const extracted = await extractPriceFromUrl(offer.url, query, curr, offer.price);
+      return {
+        ...offer,
+        price: extracted.price ?? offer.price ?? 0,
+        currency: extracted.currency || offer.currency || curr,
+        name: extracted.name || offer.name,
+        image_url: extracted.image_url || offer.image_url || undefined,
+        variant: extracted.variant || offer.variant || undefined,
+      };
+    })
+  );
+
+  // Only keep results with correct currency and a price
+  return verified
+    .filter((o) => {
+      if (o.price <= 0) return false;
+      if (o.currency && o.currency !== curr) {
+        console.log(`[Search] Dropped "${o.name}" — ${o.currency} not ${curr}`);
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => a.price - b.price);
+}
+
+/**
+ * Use Ollama (JSON mode) to identify which search results are product pages
+ * for the exact product we're looking for. This replaces all the brittle
+ * regex/keyword filters — the model understands product relevance.
+ */
+async function askOllamaToFilter(
+  results: { title: string; url: string; content: string }[],
+  productName: string,
+  currency: string,
+  sizePrefs?: SizePrefs
+): Promise<ProductOffer[]> {
   const sizeHints: string[] = [];
   if (sizePrefs) {
     for (const [key, val] of Object.entries(sizePrefs)) {
@@ -43,103 +131,66 @@ export async function searchProducts(
       }
     }
   }
-  const sizeNote = sizeHints.length > 0
-    ? `\nThe user's preferred sizes are: ${sizeHints.join(", ")}. If this product comes in sizes, prioritise finding results in these sizes.`
-    : "";
-  const retailerHint = searchHint
-    ? `\nFocus on ${searchHint}.`
-    : "";
+  const sizeNote = sizeHints.length > 0 ? `\nUser sizes: ${sizeHints.join(", ")}.` : "";
 
-  const systemPrompt = `You are a bargain-hunting shopping assistant. Your goal is to find the CHEAPEST possible prices for a SPECIFIC product across all retailers. The price you return must be the ACTUAL selling price shown on the product page, not a deposit or accessory price. Respond with ONLY a valid JSON array. No explanations.`;
+  const resultsList = results.slice(0, 20).map((r, i) =>
+    `${i + 1}. ${r.title} | ${r.url} | ${r.content.substring(0, 80)}`
+  ).join("\n");
 
-  const userPrompt = `Find the CHEAPEST prices for "${query}" available in ${region}.${exclusionNote}${sizeNote}${retailerHint}
+  console.log(`[Search] Asking Ollama to analyse ${Math.min(results.length, 20)} results...`);
 
-Return a JSON array of direct product page URLs from real retailers:
-[{"name":"exact product name from listing","price":99.99,"currency":"${curr}","url":"https://www.store.com/product-page","retailer":"Store Name","image_url":null,"variant":"colour or size if applicable, e.g. Matt Black, Pearl White, Size L"}]
+  const data = await queryOllamaJson(
+    `You identify product pages from search results. You must return a JSON object with a "products" array.`,
+    `I want to buy: "${productName}"
+
+Here are search results. Pick ONLY the ones that are online shop pages selling this EXACT product (not accessories, stickers, cases, mounts, or different products that happen to mention the name).
+${sizeNote}
+
+${resultsList}
+
+Return JSON: {"products": [{"name": "product name on page", "price": 0, "currency": "${currency}", "url": "the url", "retailer": "shop name", "variant": null}]}
 
 Rules:
-- URL must be a DIRECT product page link to this EXACT product, not search results, category pages, or similar products
-- The "price" must be the FULL selling price shown on the page — NOT a deposit, monthly payment, or accessory price
-- Find 5-10 results, prioritising the LOWEST prices first
-- Include different colour/size variants if they have different prices — a cheaper colour is a valid find
-- Search specialist retailers, clearance sites, and lesser-known shops — not just big names
-- Check for sale prices, clearance deals, and discontinued colour variants
-- The "variant" field should describe the specific colour, size, or option if the listing is for a specific one (null if generic/default)
-- Double-check each URL actually leads to the correct product before including it
-- ONLY output the JSON array`;
+- Only include pages where I can actually BUY "${productName}"
+- A "graphic kit" or "sticker" for a product is NOT the product itself
+- A review, forum post, or comparison page is NOT a shop page
+- Set price to 0 if you can't see it in the snippet
+- If NONE of the results are relevant shops, return {"products": []}`
+  );
 
-  // Step 1: Find retailer URLs via Claude + web search
-  let offers = await doSearch(systemPrompt, userPrompt);
-
-  if (offers.length === 0) {
-    const retryPrompt = `Search more broadly for the CHEAPEST "${query}" for sale in ${region}. Try Amazon, eBay, official brand stores, specialist motorcycle/sports shops, clearance outlets. Include different colour variants if they have lower prices.${exclusionNote}
-
-Return a JSON array:
-[{"name":"product name","price":99.99,"currency":"${curr}","url":"https://...","retailer":"Store Name","image_url":null,"variant":"colour/size or null"}]
-
-ONLY output the JSON array.`;
-    offers = await doSearch(systemPrompt, retryPrompt);
+  if (!data || typeof data !== "object") {
+    console.log(`[Search] Ollama returned no data`);
+    return [];
   }
 
-  // Step 2: Verify prices by fetching live pages with Cheerio
-  if (offers.length > 0) {
-    console.log(`[Search] Verifying ${offers.length} prices from live pages...`);
-    const verified = await Promise.all(
-      offers.map(async (offer) => {
-        const extracted = await extractPriceFromUrl(offer.url, query, curr, offer.price);
-        return {
-          ...offer,
-          price: extracted.price ?? offer.price ?? 0,
-          currency: extracted.currency || offer.currency || curr,
-          name: extracted.name || offer.name,
-          image_url: extracted.image_url || offer.image_url || undefined,
-          variant: extracted.variant || offer.variant || undefined,
-        };
-      })
-    );
-    // Sort by price ascending so cheapest are first
-    return verified.filter((o) => o.price > 0).sort((a, b) => a.price - b.price);
+  const obj = data as Record<string, unknown>;
+  const products = obj.products;
+  if (!Array.isArray(products)) {
+    console.log(`[Search] Ollama response has no products array`);
+    return [];
   }
 
-  return offers;
-}
+  console.log(`[Search] Ollama identified ${products.length} product pages`);
 
-async function doSearch(systemPrompt: string, userPrompt: string): Promise<ProductOffer[]> {
-  try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
-      system: systemPrompt,
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }],
-      messages: [{ role: "user", content: userPrompt }],
-    });
-
-    const allText = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("\n");
-
-    console.log("[AI Search] Response:", allText.substring(0, 500));
-
-    if (!allText.trim()) return [];
-
-    const cleaned = allText.replace(/<cite[^>]*>.*?<\/cite>/g, "").replace(/```json?\s*/g, "").replace(/```/g, "").trim();
-    const jsonMatch = cleaned.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    if (!jsonMatch) return [];
-
-    const raw = JSON.parse(jsonMatch[0]) as Record<string, unknown>[];
-    const offers: ProductOffer[] = raw.map((o) => ({
+  return (products as Record<string, unknown>[])
+    .map((o) => ({
       name: String(o.name || ""),
       price: Number(o.price) || 0,
-      currency: String(o.currency || ""),
+      currency: String(o.currency || currency),
       url: String(o.url || ""),
-      retailer: String(o.retailer || ""),
-      image_url: o.image_url ? String(o.image_url) : undefined,
+      retailer: String(o.retailer || extractRetailerFromUrl(String(o.url || ""))),
+      image_url: undefined,
       variant: o.variant ? String(o.variant) : undefined,
-    }));
-    return offers.filter((o) => o.name && o.url && o.retailer && o.url.startsWith("http"));
-  } catch (err) {
-    console.error("[AI Search] Failed:", err);
-    return [];
+    }))
+    .filter((o) => o.name && o.url && o.url.startsWith("http"));
+}
+
+function extractRetailerFromUrl(url: string): string {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "");
+    const name = hostname.split(".")[0];
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  } catch {
+    return "Unknown";
   }
 }

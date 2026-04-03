@@ -1,8 +1,5 @@
 import * as cheerio from "cheerio";
-import Anthropic from "@anthropic-ai/sdk";
 import { queryOllama } from "@/lib/ai-provider";
-
-const client = new Anthropic();
 
 export interface VariantOption {
   type: string;
@@ -20,7 +17,8 @@ export interface ExtractedPrice {
 
 /**
  * Fetch a product page and extract the live price.
- * Uses Cheerio first (structured data), falls back to AI if needed.
+ * Uses Cheerio first, falls back to Ollama (local AI) if needed.
+ * No Claude API calls — fully local.
  */
 export async function extractPriceFromUrl(
   url: string,
@@ -31,7 +29,9 @@ export async function extractPriceFromUrl(
   const html = await fetchPage(url);
 
   if (!html) {
-    return await extractWithClaude(url, expectedProduct, expectedCurrency);
+    // Can't fetch page and no web search — just skip
+    console.log(`[PriceExtract] ${url} -> page blocked, skipping`);
+    return { price: null, currency: expectedCurrency, name: null, image_url: null, variant: null };
   }
 
   if (html.length < 100) {
@@ -45,11 +45,11 @@ export async function extractPriceFromUrl(
     return cheerioResult;
   }
 
-  // Cheerio found nothing — try AI (Ollama first, Claude fallback)
-  console.log(`[PriceExtract] Cheerio failed for ${url}, trying AI...`);
-  const aiResult = await extractWithAiFromHtml(html, expectedProduct, expectedCurrency);
+  // Cheerio found nothing — try Ollama
+  console.log(`[PriceExtract] Cheerio failed for ${url}, trying Ollama...`);
+  const aiResult = await extractWithOllama(html, expectedProduct, expectedCurrency);
   if (aiResult.price != null) {
-    console.log(`[PriceExtract] ${url} -> ${aiResult.currency} ${aiResult.price} (ai-html)`);
+    console.log(`[PriceExtract] ${url} -> ${aiResult.currency} ${aiResult.price} (ollama)`);
     return aiResult;
   }
 
@@ -65,13 +65,12 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
   let image_url: string | null = null;
   let variant: string | null = null;
 
-  // Try JSON-LD first (most reliable)
+  // Try JSON-LD first
   $('script[type="application/ld+json"]').each((_, el) => {
     if (price != null) return;
     try {
       const data = JSON.parse($(el).text());
       const products = Array.isArray(data) ? data : [data];
-
       for (const item of products) {
         const offer = findOffer(item);
         if (offer) {
@@ -82,9 +81,7 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
           if (price != null) return;
         }
       }
-    } catch {
-      // skip malformed JSON-LD
-    }
+    } catch { /* skip */ }
   });
 
   // Try meta tags
@@ -99,10 +96,9 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
     }
   }
 
-  // Try microdata (itemprop)
+  // Try microdata
   if (price == null) {
-    const itempropPrice = $('[itemprop="price"]').attr("content")
-      || $('[itemprop="price"]').text();
+    const itempropPrice = $('[itemprop="price"]').attr("content") || $('[itemprop="price"]').text();
     if (itempropPrice) {
       price = parsePrice(itempropPrice);
       currency = $('[itemprop="priceCurrency"]').attr("content") || currency;
@@ -115,7 +111,7 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
     if (dataPrice) price = parsePrice(dataPrice);
   }
 
-  // Try common CSS selectors as last resort
+  // Try common CSS selectors
   if (price == null) {
     const selectors = [
       '.price-current', '.product-price', '.sale-price', '.current-price',
@@ -132,7 +128,6 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
     }
   }
 
-  // Get name from meta/title if not found
   if (!name) {
     name = $('meta[property="og:title"]').attr("content")
       || $('meta[name="twitter:title"]').attr("content")
@@ -140,94 +135,70 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
       || null;
   }
 
-  // Get image
   if (!image_url) {
     image_url = $('meta[property="og:image"]').attr("content")
       || $('meta[name="twitter:image"]').attr("content")
       || null;
   }
 
-  // Extract variant info from structured data and common selectors
+  // Extract variant info
   $('script[type="application/ld+json"]').each((_, el) => {
     if (variant) return;
     try {
       const data = JSON.parse($(el).text());
       const items = Array.isArray(data) ? data : [data];
       for (const item of items) {
-        if (item.color || item.colour) {
-          variant = String(item.color || item.colour);
-          return;
-        }
-        if (item.size) {
-          variant = variant ? `${variant} / ${item.size}` : String(item.size);
-        }
+        if (item.color || item.colour) { variant = String(item.color || item.colour); return; }
+        if (item.size) { variant = variant ? `${variant} / ${item.size}` : String(item.size); }
         const props = item.additionalProperty || item.additionalProperties;
         if (Array.isArray(props)) {
-          const variantParts: string[] = [];
+          const parts: string[] = [];
           for (const p of props) {
             const pName = String(p.name || "").toLowerCase();
-            if (pName.includes("colour") || pName.includes("color") || pName.includes("size")) {
-              variantParts.push(String(p.value));
-            }
+            if (pName.includes("colour") || pName.includes("color") || pName.includes("size")) parts.push(String(p.value));
           }
-          if (variantParts.length > 0) variant = variantParts.join(" / ");
+          if (parts.length > 0) variant = parts.join(" / ");
         }
       }
     } catch { /* skip */ }
   });
 
-  // Common HTML selectors for selected variant
   if (!variant) {
     const variantSelectors = [
-      'select[name*="colour"] option[selected]',
-      'select[name*="color"] option[selected]',
-      'select[name*="size"] option[selected]',
-      '.selected-colour', '.selected-color', '.colour-name', '.color-name',
-      '[data-selected-colour]', '[data-selected-color]',
-      '.variant-name', '.product-variant',
+      'select[name*="colour"] option[selected]', 'select[name*="color"] option[selected]',
+      'select[name*="size"] option[selected]', '.selected-colour', '.selected-color',
+      '.colour-name', '.color-name', '.variant-name', '.product-variant',
       '.swatch--selected .swatch__label', '.swatch.active',
     ];
     for (const sel of variantSelectors) {
       const text = $(sel).first().text().trim() || $(sel).first().attr("data-selected-colour") || $(sel).first().attr("data-selected-color") || "";
-      if (text && text.length < 60) {
-        variant = text;
-        break;
-      }
+      if (text && text.length < 60) { variant = text; break; }
     }
   }
 
-  // Try title for colour hints
   if (!variant && name) {
     const dashMatch = name.match(/[-\u2013]\s*(.+)$/);
     if (dashMatch) {
       const candidate = dashMatch[1].trim();
-      if (candidate.length < 40 && !/\d{3,}/.test(candidate)) {
-        variant = candidate;
-      }
+      if (candidate.length < 40 && !/\d{3,}/.test(candidate)) variant = candidate;
     }
   }
 
-  // Extract available variant options
+  // Extract available variants from dropdowns/swatches
   const available_variants: VariantOption[] = [];
-
   $('select').each((_, sel) => {
     const selectName = ($(sel).attr("name") || $(sel).attr("id") || "").toLowerCase();
     const label = $(sel).prev("label").text().toLowerCase() || selectName;
     let type: string | null = null;
     if (label.includes("colour") || label.includes("color")) type = "colour";
     else if (label.includes("size")) type = "size";
-
     if (type) {
       const options: string[] = [];
       $(sel).find("option").each((_, opt) => {
         const val = $(opt).text().trim();
-        if (val && !val.toLowerCase().includes("select") && !val.toLowerCase().includes("choose")) {
-          options.push(val);
-        }
+        if (val && !val.toLowerCase().includes("select") && !val.toLowerCase().includes("choose")) options.push(val);
       });
-      if (options.length > 0) {
-        available_variants.push({ type, options });
-      }
+      if (options.length > 0) available_variants.push({ type, options });
     }
   });
 
@@ -241,9 +212,7 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
       const val = $(el).attr("title") || $(el).attr("data-value") || $(el).text().trim();
       if (val && val.length < 40) options.push(val);
     });
-    if (options.length > 0 && !available_variants.some((v) => v.type === type)) {
-      available_variants.push({ type, options });
-    }
+    if (options.length > 0 && !available_variants.some((v) => v.type === type)) available_variants.push({ type, options });
   }
 
   return { price, currency, name, image_url, variant, available_variants: available_variants.length > 0 ? available_variants : undefined };
@@ -251,19 +220,12 @@ function extractWithCheerio(html: string, expectedCurrency: string): ExtractedPr
 
 function findOffer(item: Record<string, unknown>): Record<string, unknown> | null {
   if (!item || typeof item !== "object") return null;
-
-  if (item["@type"] === "Offer" || item["@type"] === "AggregateOffer") {
-    return item;
-  }
-
+  if (item["@type"] === "Offer" || item["@type"] === "AggregateOffer") return item;
   if (item.offers) {
     const offerList = Array.isArray(item.offers)
       ? (item.offers as Record<string, unknown>[])
       : [item.offers as Record<string, unknown>];
-
     if (offerList.length === 1) return offerList[0];
-
-    // Prefer InStock offers, then highest price (avoids deposits/accessories)
     const scored = offerList.map((o) => {
       const inStock = String(o.availability || "").toLowerCase().includes("instock");
       const price = parsePrice(o.price || o.lowPrice) ?? 0;
@@ -272,23 +234,19 @@ function findOffer(item: Record<string, unknown>): Record<string, unknown> | nul
     scored.sort((a, b) => b.score - a.score);
     return scored[0]?.offer || offerList[0];
   }
-
   if (Array.isArray(item["@graph"])) {
     for (const node of item["@graph"] as Record<string, unknown>[]) {
       const offer = findOffer(node);
       if (offer) return offer;
     }
   }
-
   return null;
 }
 
 function extractImage(item: Record<string, unknown>): string | null {
   if (typeof item.image === "string") return item.image;
   if (Array.isArray(item.image) && typeof item.image[0] === "string") return item.image[0];
-  if (item.image && typeof item.image === "object" && "url" in item.image) {
-    return (item.image as { url: string }).url;
-  }
+  if (item.image && typeof item.image === "object" && "url" in item.image) return (item.image as { url: string }).url;
   return null;
 }
 
@@ -312,7 +270,6 @@ function trimHtml(html: string, maxLen: number): string {
     const jsonLd = headHtml.match(/<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
     head = [...metas, ...title, ...jsonLd].join("\n");
   }
-
   let body = html.replace(/<head[\s\S]*?<\/head>/i, "");
   body = body.replace(/<script[\s\S]*?<\/script>/gi, "");
   body = body.replace(/<style[\s\S]*?<\/style>/gi, "");
@@ -321,7 +278,6 @@ function trimHtml(html: string, maxLen: number): string {
   body = body.replace(/<footer[\s\S]*?<\/footer>/gi, "");
   body = body.replace(/<header[\s\S]*?<\/header>/gi, "");
   body = body.replace(/\s+/g, " ");
-
   return (head + "\n" + body).substring(0, maxLen);
 }
 
@@ -332,25 +288,14 @@ async function fetchPage(url: string): Promise<string | null> {
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
       "Accept-Encoding": "identity",
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "none",
-      "Sec-Fetch-User": "?1",
-      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1", "Upgrade-Insecure-Requests": "1",
     },
-    {
-      "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-      "Accept": "text/html",
-    },
+    { "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "Accept": "text/html" },
   ];
-
   for (const headers of headerSets) {
     try {
-      const res = await fetch(url, {
-        headers,
-        redirect: "follow",
-        signal: AbortSignal.timeout(15000),
-      });
+      const res = await fetch(url, { headers, redirect: "follow", signal: AbortSignal.timeout(15000) });
       if (res.ok) return await res.text();
       console.log(`[PriceExtract] HTTP ${res.status} for ${url}`);
     } catch (err) {
@@ -360,89 +305,33 @@ async function fetchPage(url: string): Promise<string | null> {
   return null;
 }
 
-async function extractWithClaude(
-  url: string,
-  expectedProduct: string,
-  expectedCurrency: string
-): Promise<ExtractedPrice> {
-  try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
-      system: "You find product prices. Respond ONLY with a JSON object.",
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 1 }],
-      messages: [{
-        role: "user",
-        content: `What is the current price of "${expectedProduct}" at this URL: ${url}
-
-Return ONLY: {"price": 299.99, "currency": "${expectedCurrency}", "name": "product name", "image_url": null, "variant": "colour or size if specific, or null"}
-If you cannot find the price, set price to null.`,
-      }],
-    });
-
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text).join("");
-    const cleaned = text.replace(/<cite[^>]*>.*?<\/cite>/g, "").replace(/```json?\s*/g, "").replace(/```/g, "").trim();
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) return { price: null, currency: expectedCurrency, name: null, image_url: null, variant: null };
-
-    const parsed = JSON.parse(match[0]);
-    if (parsed.price) {
-      console.log(`[PriceExtract] ${url} -> ${parsed.currency} ${parsed.price} (claude-search)`);
-    }
-    return {
-      price: typeof parsed.price === "number" ? parsed.price : null,
-      currency: parsed.currency || expectedCurrency,
-      name: parsed.name || null,
-      image_url: parsed.image_url || null,
-      variant: parsed.variant || null,
-    };
-  } catch (err) {
-    console.log(`[PriceExtract] Claude search fallback failed for ${url}:`, (err as Error).message?.substring(0, 80));
-    return { price: null, currency: expectedCurrency, name: null, image_url: null, variant: null };
-  }
-}
-
 /**
- * Extract price from HTML using AI. Tries Ollama first (free, local), falls back to Claude Haiku.
+ * Extract price from HTML using Ollama (local AI). No Claude.
  */
-async function extractWithAiFromHtml(
+async function extractWithOllama(
   html: string,
   expectedProduct: string,
   expectedCurrency: string
 ): Promise<ExtractedPrice> {
   try {
     const trimmed = trimHtml(html, 8000);
-    const systemPrompt = "You extract product prices from HTML. Respond ONLY with a JSON object.";
-    const userPrompt = `Extract the price and variant details for "${expectedProduct}" from this HTML.
+    const result = await queryOllama(
+      "You extract product prices from HTML. Respond ONLY with a JSON object.",
+      `Extract the price and variant details for "${expectedProduct}" from this HTML.
 
-Return ONLY: {"price": 299.99, "currency": "${expectedCurrency}", "name": "product name", "image_url": null, "variant": "colour/size or null", "available_variants": [{"type": "colour", "options": ["Black","White"]}, {"type": "size", "options": ["S","M","L"]}]}
-Use the sale/current price. If no price found, set price to null. available_variants should list ALL selectable options on the page — empty array if none.
+Return ONLY: {"price": 299.99, "currency": "${expectedCurrency}", "name": "product name", "image_url": null, "variant": "colour/size or null"}
+Use the sale/current price. If no price found, set price to null.
 
 HTML:
-${trimmed}`;
+${trimmed}`
+    );
 
-    // Try Ollama first (free, local) — fall back to Claude if unavailable
-    let text: string | null = null;
-
-    const ollamaResult = await queryOllama(systemPrompt, userPrompt);
-    if (ollamaResult) {
-      console.log(`[PriceExtract] Using Ollama for HTML extraction`);
-      text = ollamaResult;
-    } else {
-      const response = await client.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 512,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
-      });
-      text = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === "text")
-        .map((b) => b.text).join("");
+    if (!result) {
+      console.log(`[PriceExtract] Ollama unavailable or failed`);
+      return { price: null, currency: expectedCurrency, name: null, image_url: null, variant: null };
     }
 
-    const cleaned = text.replace(/<cite[^>]*>.*?<\/cite>/g, "").replace(/```json?\s*/g, "").replace(/```/g, "").trim();
+    const cleaned = result.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) return { price: null, currency: expectedCurrency, name: null, image_url: null, variant: null };
 
@@ -453,10 +342,9 @@ ${trimmed}`;
       name: parsed.name || null,
       image_url: parsed.image_url || null,
       variant: parsed.variant || null,
-      available_variants: Array.isArray(parsed.available_variants) ? parsed.available_variants : undefined,
     };
   } catch (err) {
-    console.log(`[PriceExtract] HTML extraction failed:`, (err as Error).message?.substring(0, 80));
+    console.log(`[PriceExtract] Ollama extraction failed:`, (err as Error).message?.substring(0, 80));
     return { price: null, currency: expectedCurrency, name: null, image_url: null, variant: null };
   }
 }

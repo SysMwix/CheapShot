@@ -20,7 +20,6 @@
   },
   "homepage": "https://github.com/SysMwix/CheapShot#readme",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.82.0",
     "@google/generative-ai": "^0.24.1",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/better-sqlite3": "^7.6.13",
