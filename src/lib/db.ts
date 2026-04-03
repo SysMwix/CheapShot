@@ -70,6 +70,18 @@ function migrate(db: Database.Database) {
       details_json TEXT,
       checked_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS trust_scoring_locks (
+      domain TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'locked',
+      locked_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS review_cache (
+      product_name TEXT PRIMARY KEY,
+      review_json TEXT NOT NULL,
+      cached_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Incremental migrations — safely add columns to existing tables
