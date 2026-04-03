@@ -1,0 +1,59 @@
+# CheapShot — Fully self-hosted, zero API costs
+#
+# Quick start:
+#   docker compose up -d
+#   docker compose exec ollama ollama pull qwen2.5:7b
+#   Open http://localhost:3000
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_PATH=/app/data/cheapshot.db
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=qwen2.5:7b
+      - OLLAMA_ENABLED=true
+      - SEARXNG_URL=http://searxng:8080
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - searxng
+      - ollama
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /bin/ollama serve &
+        sleep 5
+        ollama pull qwen2.5:7b
+        wait
+
+volumes:
+  ollama-models:
