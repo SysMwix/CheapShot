@@ -23,6 +23,7 @@ export default function Dashboard() {
   const [products, setProducts] = useState<ProductCardData[]>([]);
   const [filtered, setFiltered] = useState<ProductCardData[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [initialSearch, setInitialSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   const fetchProducts = useCallback(async () => {
@@ -56,14 +57,20 @@ export default function Dashboard() {
   }, [fetchProducts]);
 
   function handleSearch(query: string) {
+    // If no tracked products match, open add modal with query pre-filled
     const q = query.toLowerCase();
-    setFiltered(
-      products.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.url.toLowerCase().includes(q)
-      )
+    const matches = products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.url.toLowerCase().includes(q)
     );
+
+    if (matches.length > 0) {
+      setFiltered(matches);
+    } else {
+      setInitialSearch(query);
+      setShowModal(true);
+    }
   }
 
   async function handleCheckPrice(id: number) {
@@ -87,7 +94,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <SearchBar onSearch={handleSearch} onAdd={() => setShowModal(true)} />
+      <SearchBar onSearch={handleSearch} onAdd={() => { setInitialSearch(""); setShowModal(true); }} />
 
       {loading ? (
         <div className="text-center text-gray-400 py-12">Loading...</div>
@@ -117,8 +124,9 @@ export default function Dashboard() {
 
       <AddProductModal
         open={showModal}
-        onClose={() => setShowModal(false)}
+        onClose={() => { setShowModal(false); setInitialSearch(""); }}
         onAdded={fetchProducts}
+        initialQuery={initialSearch}
       />
     </div>
   );

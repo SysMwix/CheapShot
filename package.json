@@ -15,11 +15,12 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-    "bugs": {
+  "bugs": {
     "url": "https://github.com/SysMwix/CheapShot/issues"
   },
   "homepage": "https://github.com/SysMwix/CheapShot#readme",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.5.2",
