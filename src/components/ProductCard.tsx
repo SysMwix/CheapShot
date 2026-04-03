@@ -202,20 +202,17 @@ export default function ProductCard({
                   {source.retailer}
                 </a>
                 {source.trust_score != null ? (
-                  <span
-                    className={`relative group text-xs px-1 rounded cursor-help ${
+                  <Link
+                    href={`/trust/${getDomain(source.url)}`}
+                    className={`text-xs px-1 rounded hover:opacity-80 transition ${
                       source.trust_score >= 70 ? "bg-emerald-100 text-emerald-700" :
                       source.trust_score >= 50 ? "bg-yellow-100 text-yellow-700" :
                       "bg-red-100 text-red-700"
                     }`}
+                    title="View trust report"
                   >
                     {source.trust_score}
-                    {source.trust_summary && (
-                      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-52 p-1.5 bg-gray-900 text-white text-xs rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 pointer-events-none font-normal">
-                        {source.trust_summary}
-                      </span>
-                    )}
-                  </span>
+                  </Link>
                 ) : null}
                 <span className="flex-1" />
                 <span className="font-medium whitespace-nowrap">
@@ -275,4 +272,12 @@ export default function ProductCard({
       )}
     </div>
   );
+}
+
+function getDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
 }

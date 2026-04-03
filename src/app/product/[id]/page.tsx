@@ -231,16 +231,13 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
                     </td>
                     <td className="px-4 py-3 text-center">
                       {source.trust_score != null ? (
-                        <div className="relative group inline-flex items-center gap-1.5 cursor-help">
+                        <Link
+                          href={`/trust/${getDomain(source.url)}`}
+                          className="inline-flex items-center gap-1.5 hover:opacity-80 transition"
+                        >
                           <TrustBadge score={source.trust_score} />
-                          <span className="text-xs text-gray-500">{source.trust_score}/100</span>
-                          {source.trust_summary && (
-                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-64 p-2.5 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
-                              {source.trust_summary}
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900" />
-                            </div>
-                          )}
-                        </div>
+                          <span className="text-xs text-gray-500 hover:text-emerald-600">{source.trust_score}/100</span>
+                        </Link>
                       ) : (
                         <span className="flex items-center justify-center gap-1 text-xs text-gray-400">
                           <span className="inline-block w-3 h-3 border-2 border-gray-300 border-t-emerald-500 rounded-full animate-spin" />
@@ -290,6 +287,14 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
 function getDeviation(current: number | null, previous: number | null): number | null {
   if (current == null || previous == null || previous === 0) return null;
   return ((current - previous) / previous) * 100;
+}
+
+function getDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
 }
 
 function TrustBadge({ score }: { score: number }) {

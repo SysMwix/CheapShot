@@ -125,7 +125,7 @@ async function scoreSources(sourceIds: number[]) {
       // Check cache first (valid for 7 days)
       const cached = db.prepare(
         "SELECT * FROM trust_cache WHERE domain = ? AND datetime(checked_at, '+7 days') > datetime('now')"
-      ).get(domain) as { score: number; summary: string } | undefined;
+      ).get(domain) as { score: number; summary: string; details_json: string | null } | undefined;
 
       if (cached) {
         db.prepare(
@@ -135,16 +135,16 @@ async function scoreSources(sourceIds: number[]) {
         continue;
       }
 
-      // Fetch fresh score
+      // Fetch fresh detailed score
       const result = await getTrustScore(source.retailer, source.url);
       db.prepare(
         "UPDATE product_sources SET trust_score = ?, trust_summary = ? WHERE id = ?"
       ).run(result.score, result.summary, sourceId);
 
-      // Update cache
+      // Update cache with full details
       db.prepare(
-        "INSERT OR REPLACE INTO trust_cache (domain, retailer, score, summary, checked_at) VALUES (?, ?, ?, ?, datetime('now'))"
-      ).run(domain, source.retailer, result.score, result.summary);
+        "INSERT OR REPLACE INTO trust_cache (domain, retailer, score, summary, details_json, checked_at) VALUES (?, ?, ?, ?, ?, datetime('now'))"
+      ).run(domain, source.retailer, result.score, result.summary, JSON.stringify({ categories: result.categories, factors: result.factors }));
 
       console.log(`[Trust] ${source.retailer}: ${result.score}/100`);
     } catch (err) {

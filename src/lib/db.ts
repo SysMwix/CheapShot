@@ -58,6 +58,7 @@ function migrate(db: Database.Database) {
       retailer TEXT NOT NULL,
       score REAL NOT NULL,
       summary TEXT,
+      details_json TEXT,
       checked_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
