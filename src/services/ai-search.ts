@@ -12,7 +12,7 @@ export interface ProductOffer {
   variant?: string;
 }
 
-// Only block obvious non-shopping domains — let Ollama decide the rest
+// Only block obvious non-shopping domains
 const BLOCKED_DOMAINS = [
   "reddit.com", "facebook.com", "twitter.com", "x.com", "instagram.com",
   "youtube.com", "tiktok.com", "pinterest.com", "linkedin.com",
@@ -34,18 +34,10 @@ export async function searchProducts(
 ): Promise<ProductOffer[]> {
   const curr = currency || "GBP";
 
-  // Multiple search angles to find actual product pages
-  const searchQueries = [
-    `${query} buy`,
-    `${query} price`,
-    `${query} for sale`,
-    `${query} £`,
-  ];
-  if (searchHint) {
-    searchQueries.push(`${query} ${searchHint}`);
-  }
+  // Build search queries — generic plus category-specific
+  const searchQueries = buildSearchQueries(query, searchHint);
 
-  console.log(`[Search] Searching for "${query}" via SearXNG...`);
+  console.log(`[Search] Searching for "${query}" via SearXNG (${searchQueries.length} queries)...`);
   const allResults = new Map<string, { title: string; url: string; content: string }>();
 
   for (const sq of searchQueries) {
@@ -62,7 +54,7 @@ export async function searchProducts(
     return [];
   }
 
-  // Light filter — only remove social media and non-shopping sites
+  // Light domain filter
   const userExcluded = (excludeRetailers || []).map((r) => r.toLowerCase());
   const filtered = Array.from(allResults.values()).filter((r) => {
     const urlLower = r.url.toLowerCase();
@@ -72,14 +64,13 @@ export async function searchProducts(
   });
 
   console.log(`[Search] ${allResults.size} results -> ${filtered.length} after domain filter`);
-
   if (filtered.length === 0) return [];
 
-  // Let Ollama identify which results are actual product pages for this exact product
+  // Ollama identifies actual product pages
   const offers = await askOllamaToFilter(filtered, query, curr, sizePrefs);
 
   if (offers.length === 0) {
-    console.log(`[Search] No product pages identified by Ollama`);
+    console.log(`[Search] No product pages identified`);
     return [];
   }
 
@@ -99,7 +90,6 @@ export async function searchProducts(
     })
   );
 
-  // Only keep results with correct currency and a price
   return verified
     .filter((o) => {
       if (o.price <= 0) return false;
@@ -113,10 +103,35 @@ export async function searchProducts(
 }
 
 /**
- * Use Ollama (JSON mode) to identify which search results are product pages
- * for the exact product we're looking for. This replaces all the brittle
- * regex/keyword filters — the model understands product relevance.
+ * Build smart search queries based on the product and category hint.
+ * Different categories need different search strategies.
  */
+function buildSearchQueries(query: string, searchHint?: string): string[] {
+  const queries: string[] = [
+    `${query} buy online`,
+    `${query} price £`,
+  ];
+
+  if (searchHint) {
+    // Extract retailer names from the hint (e.g. "car parts retailers like Euro Car Parts, GSF, Autodoc")
+    const likeMatch = searchHint.match(/like\s+(.+)/i);
+    if (likeMatch) {
+      const retailers = likeMatch[1].split(/,\s*/).map((r) => r.trim());
+      // Search for the product on specific retailers
+      for (const retailer of retailers.slice(0, 3)) {
+        queries.push(`${query} ${retailer}`);
+      }
+    } else {
+      queries.push(`${query} ${searchHint}`);
+    }
+  }
+
+  // Always add a generic shopping query
+  queries.push(`buy ${query} UK`);
+
+  return queries;
+}
+
 async function askOllamaToFilter(
   results: { title: string; url: string; content: string }[],
   productName: string,
@@ -144,7 +159,7 @@ async function askOllamaToFilter(
     `You identify product pages from search results. You must return a JSON object with a "products" array.`,
     `I want to buy: "${productName}"
 
-Here are search results. Pick ONLY the ones that are online shop pages selling this EXACT product (not accessories, stickers, cases, mounts, or different products that happen to mention the name).
+Here are search results. Pick ONLY the ones that are online shop pages where I can BUY this exact product or a very close match. Include product pages AND category pages from real shops if they clearly sell this item.
 ${sizeNote}
 
 ${resultsList}
@@ -152,11 +167,11 @@ ${resultsList}
 Return JSON: {"products": [{"name": "product name on page", "price": 0, "currency": "${currency}", "url": "the url", "retailer": "shop name", "variant": null}]}
 
 Rules:
-- Only include pages where I can actually BUY "${productName}"
-- A "graphic kit" or "sticker" for a product is NOT the product itself
-- A review, forum post, or comparison page is NOT a shop page
+- Include pages from real online shops that sell this product
+- A "graphic kit", "sticker", or unrelated accessory is NOT the product
+- Review sites, forums, blogs, and news articles are NOT shops
 - Set price to 0 if you can't see it in the snippet
-- If NONE of the results are relevant shops, return {"products": []}`
+- If NONE are relevant, return {"products": []}`
   );
 
   if (!data || typeof data !== "object") {

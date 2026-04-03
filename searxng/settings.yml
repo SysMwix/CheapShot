@@ -13,6 +13,41 @@ search:
     - html
     - json
 
+  # Block non-shopping domains at the search engine level
+  # so they don't waste result slots
+  banned_domains:
+    # Social media
+    - zhihu.com
+    - baidu.com
+    - quora.com
+    - reddit.com
+    - facebook.com
+    - twitter.com
+    - x.com
+    - instagram.com
+    - youtube.com
+    - tiktok.com
+    - pinterest.com
+    - linkedin.com
+    # Reference / editorial
+    - wikipedia.org
+    - wikihow.com
+    - trustpilot.com
+    - reviewcentre.com
+    # Car listing sites (not parts shops)
+    - autotrader.co.uk
+    - motors.co.uk
+    - clickmechanic.com
+    - parkers.co.uk
+    - carwow.co.uk
+    # Price comparison (we are the price comparison)
+    - idealo.co.uk
+    - pricerunner.com
+    - kelkoo.co.uk
+    - pricespy.co.uk
+    - pricehunter.co.uk
+    - google.com/shopping
+
 engines:
   - name: google
     engine: google

@@ -4,7 +4,14 @@ import { use } from "react";
 import { useRegion, SIZE_OPTIONS, SizePreferences } from "@/components/RegionContext";
 import { getCategoryBySlug } from "@/lib/categories";
 import ProductGrid from "@/components/ProductGrid";
+import VehicleManager from "@/components/VehicleManager";
 import { notFound } from "next/navigation";
+
+// Categories that support vehicle reg lookup
+const VEHICLE_CATEGORIES: Record<string, "car" | "motorbike"> = {
+  auto: "car",
+  motorbike: "motorbike",
+};
 
 export default function CategoryPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
@@ -15,7 +22,6 @@ export default function CategoryPage({ params }: { params: Promise<{ slug: strin
     notFound();
   }
 
-  // Collect the unique size keys relevant to this category's subcategories
   const relevantSizeKeys = Array.from(
     new Set(
       category.subcategories
@@ -24,9 +30,10 @@ export default function CategoryPage({ params }: { params: Promise<{ slug: strin
     )
   );
 
+  const vehicleType = VEHICLE_CATEGORIES[slug];
+
   return (
     <div className="space-y-6">
-      {/* Category header with relevant size preferences */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">
@@ -37,6 +44,11 @@ export default function CategoryPage({ params }: { params: Promise<{ slug: strin
           </p>
         </div>
       </div>
+
+      {/* Vehicle lookup — only on motorbike and auto pages */}
+      {vehicleType && (
+        <VehicleManager vehicleType={vehicleType} />
+      )}
 
       {/* Size preferences relevant to this category */}
       {relevantSizeKeys.length > 0 && (
@@ -67,7 +79,6 @@ export default function CategoryPage({ params }: { params: Promise<{ slug: strin
         </div>
       )}
 
-      {/* Product grid filtered to this category */}
       <ProductGrid categoryFilter={slug} defaultAddCategory={slug} />
     </div>
   );

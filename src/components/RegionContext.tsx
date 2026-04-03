@@ -67,9 +67,21 @@ const DEFAULT_SIZES: SizePreferences = {
   bootSize: "", waist: "", jeansSize: "",
 };
 
+export interface SavedVehicle {
+  registration: string;
+  make: string;
+  model: string;
+  year: number;
+  colour: string;
+  fuelType: string;
+  engineSize?: string;
+  type: "car" | "motorbike";
+}
+
 const REGION_KEY = "cheapshot-region";
 const TRUST_KEY = "cheapshot-min-trust";
 const SIZES_KEY = "cheapshot-sizes";
+const VEHICLES_KEY = "cheapshot-vehicles";
 
 interface SettingsContextValue {
   region: Region;
@@ -78,6 +90,9 @@ interface SettingsContextValue {
   setMinTrust: (score: number) => void;
   sizes: SizePreferences;
   setSizes: (sizes: SizePreferences) => void;
+  vehicles: SavedVehicle[];
+  addVehicle: (vehicle: SavedVehicle) => void;
+  removeVehicle: (registration: string) => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -86,6 +101,7 @@ export function RegionProvider({ children }: { children: ReactNode }) {
   const [region, setRegionState] = useState<Region>(REGIONS[0]);
   const [minTrust, setMinTrustState] = useState(0);
   const [sizes, setSizesState] = useState<SizePreferences>(DEFAULT_SIZES);
+  const [vehicles, setVehiclesState] = useState<SavedVehicle[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -99,6 +115,10 @@ export function RegionProvider({ children }: { children: ReactNode }) {
     const savedSizes = localStorage.getItem(SIZES_KEY);
     if (savedSizes) {
       try { setSizesState({ ...DEFAULT_SIZES, ...JSON.parse(savedSizes) }); } catch { /* ignore */ }
+    }
+    const savedVehicles = localStorage.getItem(VEHICLES_KEY);
+    if (savedVehicles) {
+      try { setVehiclesState(JSON.parse(savedVehicles)); } catch { /* ignore */ }
     }
     setLoaded(true);
   }, []);
@@ -118,10 +138,22 @@ export function RegionProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(SIZES_KEY, JSON.stringify(s));
   }
 
+  function addVehicle(v: SavedVehicle) {
+    const updated = [...vehicles.filter((e) => e.registration !== v.registration), v];
+    setVehiclesState(updated);
+    localStorage.setItem(VEHICLES_KEY, JSON.stringify(updated));
+  }
+
+  function removeVehicle(registration: string) {
+    const updated = vehicles.filter((v) => v.registration !== registration);
+    setVehiclesState(updated);
+    localStorage.setItem(VEHICLES_KEY, JSON.stringify(updated));
+  }
+
   if (!loaded) return null;
 
   return (
-    <SettingsContext.Provider value={{ region, setRegion, minTrust, setMinTrust, sizes, setSizes }}>
+    <SettingsContext.Provider value={{ region, setRegion, minTrust, setMinTrust, sizes, setSizes, vehicles, addVehicle, removeVehicle }}>
       {children}
     </SettingsContext.Provider>
   );

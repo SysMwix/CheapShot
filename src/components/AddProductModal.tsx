@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRegion, SizePreferences } from "./RegionContext";
+import { useRegion, SizePreferences, SavedVehicle } from "./RegionContext";
 import { CATEGORIES, findSubcategory } from "@/lib/categories";
 import FrequencySelector from "./FrequencySelector";
 import type { CheckFrequency } from "@/lib/db";
@@ -21,11 +21,15 @@ interface AddProductModalProps {
   defaultCategory?: string;
 }
 
+// Categories that can have a vehicle attached
+const VEHICLE_CATEGORIES = ["auto", "motorbike"];
+
 export default function AddProductModal({ open, onClose, onAdded, defaultCategory }: AddProductModalProps) {
-  const { region, minTrust: globalMinTrust, sizes } = useRegion();
+  const { region, minTrust: globalMinTrust, sizes, vehicles } = useRegion();
   const [name, setName] = useState("");
   const [category, setCategory] = useState(defaultCategory || "");
   const [subcategory, setSubcategory] = useState("");
+  const [selectedVehicle, setSelectedVehicle] = useState("");
   const [desiredPrice, setDesiredPrice] = useState("");
   const [checkFrequency, setCheckFrequency] = useState<CheckFrequency>("manual");
   const [checkDay, setCheckDay] = useState<number | null>(null);
@@ -38,8 +42,15 @@ export default function AddProductModal({ open, onClose, onAdded, defaultCategor
       setMinTrust(globalMinTrust.toString());
       setCategory(defaultCategory || "");
       setSubcategory("");
+      setSelectedVehicle("");
     }
   }, [open, globalMinTrust, defaultCategory]);
+
+  // Get vehicles relevant to the selected category
+  const relevantVehicles = VEHICLE_CATEGORIES.includes(category)
+    ? vehicles.filter((v) => (category === "auto" ? v.type === "car" : v.type === "motorbike"))
+    : [];
+  const vehicle = relevantVehicles.find((v) => v.registration === selectedVehicle);
 
   useEffect(() => {
     setSubcategory("");
@@ -59,11 +70,20 @@ export default function AddProductModal({ open, onClose, onAdded, defaultCategor
     setError("");
 
     try {
+      // Prefix product name with vehicle make/model if selected
+      let productName = name.trim();
+      if (vehicle) {
+        const vehiclePrefix = `${vehicle.make} ${vehicle.model} ${vehicle.year}`;
+        if (!productName.toLowerCase().includes(vehicle.make.toLowerCase())) {
+          productName = `${vehiclePrefix} ${productName}`;
+        }
+      }
+
       const res = await fetch("/api/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
+          name: productName,
           desired_price: desiredPrice ? parseFloat(desiredPrice) : null,
           currency: region.currency,
           check_frequency: checkFrequency,
@@ -168,6 +188,32 @@ export default function AddProductModal({ open, onClose, onAdded, defaultCategor
               {selectedSub?.sizeKey && !savedSize && (
                 <p className="text-xs text-gray-400 mt-1">
                   No default size set for this — set one in &quot;My Sizes&quot; to auto-filter
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Vehicle selector — only for auto/motorbike categories */}
+          {relevantVehicles.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                For which vehicle? <span className="text-gray-400 font-normal">— auto-adds make/model to search</span>
+              </label>
+              <select
+                value={selectedVehicle}
+                onChange={(e) => setSelectedVehicle(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="">None / Generic</option>
+                {relevantVehicles.map((v) => (
+                  <option key={v.registration} value={v.registration}>
+                    {v.registration} — {v.make} {v.model} {v.year}
+                  </option>
+                ))}
+              </select>
+              {vehicle && (
+                <p className="text-xs text-emerald-600 mt-1">
+                  Will search for: {vehicle.make} {vehicle.model} {vehicle.year} + your product name
                 </p>
               )}
             </div>
