@@ -25,44 +25,63 @@ export const REGIONS: Region[] = [
   { code: "NZ", name: "New Zealand", currency: "NZD", flag: "NZ" },
 ];
 
-const STORAGE_KEY = "cheapshot-region";
+export const TRUST_LEVELS = [
+  { value: 0, label: "Any" },
+  { value: 30, label: "30+" },
+  { value: 50, label: "50+" },
+  { value: 70, label: "70+" },
+  { value: 90, label: "90+" },
+];
 
-interface RegionContextValue {
+const REGION_KEY = "cheapshot-region";
+const TRUST_KEY = "cheapshot-min-trust";
+
+interface SettingsContextValue {
   region: Region;
   setRegion: (region: Region) => void;
+  minTrust: number;
+  setMinTrust: (score: number) => void;
 }
 
-const RegionContext = createContext<RegionContextValue | null>(null);
+const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function RegionProvider({ children }: { children: ReactNode }) {
   const [region, setRegionState] = useState<Region>(REGIONS[0]);
+  const [minTrust, setMinTrustState] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const found = REGIONS.find((r) => r.code === saved);
+    const savedRegion = localStorage.getItem(REGION_KEY);
+    if (savedRegion) {
+      const found = REGIONS.find((r) => r.code === savedRegion);
       if (found) setRegionState(found);
     }
+    const savedTrust = localStorage.getItem(TRUST_KEY);
+    if (savedTrust) setMinTrustState(parseInt(savedTrust) || 0);
     setLoaded(true);
   }, []);
 
   function setRegion(r: Region) {
     setRegionState(r);
-    localStorage.setItem(STORAGE_KEY, r.code);
+    localStorage.setItem(REGION_KEY, r.code);
+  }
+
+  function setMinTrust(score: number) {
+    setMinTrustState(score);
+    localStorage.setItem(TRUST_KEY, score.toString());
   }
 
   if (!loaded) return null;
 
   return (
-    <RegionContext.Provider value={{ region, setRegion }}>
+    <SettingsContext.Provider value={{ region, setRegion, minTrust, setMinTrust }}>
       {children}
-    </RegionContext.Provider>
+    </SettingsContext.Provider>
   );
 }
 
 export function useRegion() {
-  const ctx = useContext(RegionContext);
+  const ctx = useContext(SettingsContext);
   if (!ctx) throw new Error("useRegion must be used within RegionProvider");
   return ctx;
 }

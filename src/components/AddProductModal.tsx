@@ -12,12 +12,12 @@ interface AddProductModalProps {
 }
 
 export default function AddProductModal({ open, onClose, onAdded }: AddProductModalProps) {
-  const { region } = useRegion();
+  const { region, minTrust: globalMinTrust } = useRegion();
   const [name, setName] = useState("");
   const [desiredPrice, setDesiredPrice] = useState("");
   const [checkFrequency, setCheckFrequency] = useState<CheckFrequency>("manual");
   const [checkDay, setCheckDay] = useState<number | null>(null);
-  const [minTrust, setMinTrust] = useState("0");
+  const [minTrust, setMinTrust] = useState(globalMinTrust.toString());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
