@@ -3,7 +3,7 @@ import { getDb, PriceHistory } from "@/lib/db";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-// GET /api/products/[id]/history — get price history
+// GET /api/products/[id]/history — get combined price history across all sources
 export async function GET(_request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const db = getDb();
@@ -13,9 +13,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Product not found" }, { status: 404 });
   }
 
+  // Get best (lowest) price at each check time across all sources
   const history = db
-    .prepare("SELECT * FROM price_history WHERE product_id = ? ORDER BY checked_at ASC")
-    .all(id) as PriceHistory[];
+    .prepare(`
+      SELECT ph.id, ph.source_id, ph.price, ph.checked_at, ps.retailer
+      FROM price_history ph
+      JOIN product_sources ps ON ps.id = ph.source_id
+      WHERE ps.product_id = ?
+      ORDER BY ph.checked_at ASC
+    `)
+    .all(id) as (PriceHistory & { retailer: string })[];
 
   return NextResponse.json(history);
 }

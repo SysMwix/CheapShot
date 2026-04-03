@@ -10,8 +10,8 @@ export interface Region {
 }
 
 export const REGIONS: Region[] = [
-  { code: "US", name: "United States", currency: "USD", flag: "US" },
   { code: "GB", name: "United Kingdom", currency: "GBP", flag: "GB" },
+  { code: "US", name: "United States", currency: "USD", flag: "US" },
   { code: "CA", name: "Canada", currency: "CAD", flag: "CA" },
   { code: "AU", name: "Australia", currency: "AUD", flag: "AU" },
   { code: "DE", name: "Germany", currency: "EUR", flag: "DE" },

@@ -1,100 +1,120 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRegion } from "@/components/RegionContext";
 import SearchBar from "@/components/SearchBar";
 import ProductCard, { ProductCardData } from "@/components/ProductCard";
 import AddProductModal from "@/components/AddProductModal";
 
-interface ApiProduct {
-  id: number;
-  name: string;
-  url: string;
-  image_url: string | null;
-  current_price: number | null;
-  desired_price: number;
-  currency: string;
-}
-
-interface PriceHistoryEntry {
-  price: number;
-}
-
 export default function Dashboard() {
+  const { region } = useRegion();
   const [products, setProducts] = useState<ProductCardData[]>([]);
   const [filtered, setFiltered] = useState<ProductCardData[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [initialSearch, setInitialSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [filterQuery, setFilterQuery] = useState("");
 
   const fetchProducts = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await fetch("/api/products");
-      const items: ApiProduct[] = await res.json();
+      const items = await res.json();
 
-      const withHistory = await Promise.all(
-        items.map(async (p) => {
+      const withHistory: ProductCardData[] = await Promise.all(
+        items.map(async (p: ProductCardData) => {
           const hRes = await fetch(`/api/products/${p.id}/history`);
-          const history: PriceHistoryEntry[] = await hRes.json();
-          return {
-            ...p,
-            priceHistory: history.map((h) => h.price),
-          };
+          const history = await hRes.json();
+          // Get the lowest price at each check point for sparkline
+          const prices = history.map((h: { price: number }) => h.price);
+          return { ...p, priceHistory: prices };
         })
       );
 
       setProducts(withHistory);
-      setFiltered(withHistory);
+      // Re-apply filter
+      if (filterQuery) {
+        const q = filterQuery.toLowerCase();
+        setFiltered(withHistory.filter((p) => p.name.toLowerCase().includes(q)));
+      } else {
+        setFiltered(withHistory);
+      }
     } catch (err) {
       console.error("Failed to fetch products:", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterQuery]);
 
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
 
   function handleSearch(query: string) {
-    // If no tracked products match, open add modal with query pre-filled
+    setFilterQuery(query);
     const q = query.toLowerCase();
-    const matches = products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.url.toLowerCase().includes(q)
-    );
-
-    if (matches.length > 0) {
-      setFiltered(matches);
+    if (!q) {
+      setFiltered(products);
     } else {
-      setInitialSearch(query);
-      setShowModal(true);
+      setFiltered(products.filter((p) => p.name.toLowerCase().includes(q)));
     }
   }
 
-  async function handleCheckPrice(id: number) {
-    await fetch(`/api/products/${id}/check-price`, { method: "POST" });
-    fetchProducts();
+  async function handleProductAdded(productId: number) {
+    // Refresh list immediately to show the new card in loading state
+    await fetchProducts();
+
+    // Kick off AI search in background
+    triggerSearch(productId);
   }
 
-  async function handleSetPrice(id: number, price: number) {
-    await fetch(`/api/products/${id}/check-price`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ price }),
+  async function triggerSearch(productId: number) {
+    // Mark as searching locally for instant feedback
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, search_status: "searching" } : p
+      )
+    );
+    setFiltered((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, search_status: "searching" } : p
+      )
+    );
+
+    try {
+      await fetch(`/api/products/${productId}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          country: region.name,
+          currency: region.currency,
+        }),
+      });
+    } catch (err) {
+      console.error("Search failed:", err);
+    }
+
+    // Refresh to get the results
+    await fetchProducts();
+  }
+
+  async function handleRemoveSource(productId: number, sourceId: number) {
+    await fetch(`/api/products/${productId}/sources/${sourceId}`, {
+      method: "DELETE",
     });
-    fetchProducts();
+    await fetchProducts();
+  }
+
+  async function handleFindMore(productId: number) {
+    triggerSearch(productId);
   }
 
   async function handleDelete(id: number) {
     await fetch(`/api/products/${id}`, { method: "DELETE" });
-    fetchProducts();
+    await fetchProducts();
   }
 
   return (
     <div className="space-y-6">
-      <SearchBar onSearch={handleSearch} onAdd={() => { setInitialSearch(""); setShowModal(true); }} />
+      <SearchBar onSearch={handleSearch} onAdd={() => setShowModal(true)} />
 
       {loading ? (
         <div className="text-center text-gray-400 py-12">Loading...</div>
@@ -114,9 +134,9 @@ export default function Dashboard() {
             <ProductCard
               key={product.id}
               product={product}
-              onCheckPrice={handleCheckPrice}
-              onSetPrice={handleSetPrice}
               onDelete={handleDelete}
+              onRemoveSource={handleRemoveSource}
+              onFindMore={handleFindMore}
             />
           ))}
         </div>
@@ -124,9 +144,8 @@ export default function Dashboard() {
 
       <AddProductModal
         open={showModal}
-        onClose={() => { setShowModal(false); setInitialSearch(""); }}
-        onAdded={fetchProducts}
-        initialQuery={initialSearch}
+        onClose={() => setShowModal(false)}
+        onAdded={handleProductAdded}
       />
     </div>
   );

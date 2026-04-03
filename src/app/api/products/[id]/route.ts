@@ -12,14 +12,19 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   if (!product) {
     return NextResponse.json({ error: "Product not found" }, { status: 404 });
   }
-  return NextResponse.json(product);
+
+  const sources = db
+    .prepare("SELECT * FROM product_sources WHERE product_id = ? ORDER BY current_price ASC")
+    .all(id);
+
+  return NextResponse.json({ ...product, sources });
 }
 
 // PUT /api/products/[id]
 export async function PUT(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = await request.json();
-  const { name, url, image_url, desired_price, currency } = body;
+  const { name, desired_price, currency } = body;
 
   const db = getDb();
   const existing = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as Product | undefined;
@@ -28,18 +33,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   }
 
   db.prepare(
-    `UPDATE products SET
-       name = ?, url = ?, image_url = ?, desired_price = ?, currency = ?,
-       updated_at = datetime('now')
-     WHERE id = ?`
-  ).run(
-    name ?? existing.name,
-    url ?? existing.url,
-    image_url ?? existing.image_url,
-    desired_price ?? existing.desired_price,
-    currency ?? existing.currency,
-    id
-  );
+    "UPDATE products SET name = ?, desired_price = ?, currency = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(name ?? existing.name, desired_price ?? existing.desired_price, currency ?? existing.currency, id);
 
   const updated = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as Product;
   return NextResponse.json(updated);
