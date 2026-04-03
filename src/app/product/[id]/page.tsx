@@ -64,6 +64,8 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [variantFilters, setVariantFilters] = useState<Record<string, string>>({});
+  const [manualUrl, setManualUrl] = useState("");
+  const [addingManual, setAddingManual] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -82,6 +84,8 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
 
   useEffect(() => {
     fetchData();
+    fetchReview();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchData]);
 
   async function handleRefresh() {
@@ -139,6 +143,26 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
     }
     await fetchData();
     setRefreshing(false);
+  }
+
+  async function handleAddManualUrl(e: React.FormEvent) {
+    e.preventDefault();
+    const url = manualUrl.trim();
+    if (!url || !url.startsWith("http")) return;
+
+    setAddingManual(true);
+    try {
+      await fetch(`/api/products/${id}/sources/manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, currency: product?.currency || "GBP" }),
+      });
+      setManualUrl("");
+      await fetchData();
+    } catch (err) {
+      console.error("Manual add failed:", err);
+    }
+    setAddingManual(false);
   }
 
   async function fetchReview() {
@@ -280,6 +304,32 @@ export default function ProductDetailPage({ params }: { params: Promise<{ id: st
           Clear &amp; Re-search
         </button>
       </div>
+
+      {/* Manual URL add */}
+      <form onSubmit={handleAddManualUrl} className="flex gap-2">
+        <input
+          type="url"
+          value={manualUrl}
+          onChange={(e) => setManualUrl(e.target.value)}
+          placeholder="Paste a product URL to add manually..."
+          className="flex-1 border rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          disabled={addingManual}
+        />
+        <button
+          type="submit"
+          disabled={addingManual || !manualUrl.trim()}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50"
+        >
+          {addingManual ? (
+            <span className="flex items-center gap-2">
+              <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Adding...
+            </span>
+          ) : (
+            "+ Add URL"
+          )}
+        </button>
+      </form>
 
       {/* Price chart */}
       <div className="bg-white border rounded-lg p-4">
